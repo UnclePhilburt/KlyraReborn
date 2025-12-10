@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fantasy Roguelite - Co-op Adventure</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: #fff;
+        }
+
+        #loading-screen h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: #f0a500;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #loading-bar {
+            width: 300px;
+            height: 30px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        #loading-progress {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #f0a500 0%, #ff6b6b 100%);
+            transition: width 0.3s ease;
+        }
+
+        #loading-text {
+            margin-top: 15px;
+            font-size: 1.2em;
+            color: #ccc;
+        }
+
+        #hud {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+        }
+
+        #player-list {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+            min-width: 200px;
+        }
+
+        #player-list h3 {
+            margin-bottom: 10px;
+            color: #f0a500;
+            border-bottom: 2px solid #f0a500;
+            padding-bottom: 5px;
+        }
+
+        .player-item {
+            padding: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .player-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4ecca3;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-size: 12px;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-screen">
+        <h1>Fantasy Roguelite</h1>
+        <p style="font-size: 1.2em; color: #ccc;">10 Player Co-op Adventure</p>
+        <div id="loading-bar">
+            <div id="loading-progress"></div>
+        </div>
+        <div id="loading-text">Connecting to server...</div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <div id="ui-overlay">
+        <div id="hud">
+            <div><strong>Server:</strong> <span id="server-status">Connecting...</span></div>
+            <div><strong>Players:</strong> <span id="player-count">0/10</span></div>
+            <div><strong>FPS:</strong> <span id="fps">60</span></div>
+        </div>
+
+        <div id="player-list">
+            <h3>Players Online</h3>
+            <div id="players-container"></div>
+        </div>
+
+        <div id="controls">
+            <strong>Controls:</strong> WASD - Move | Mouse - Look | Space - Jump | Click - Attack
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "fantasy-roguelite",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "10 player co-op fantasy roguelite game",
+  "scripts": {
+    "install:all": "npm run install:client && npm run install:server",
+    "install:client": "cd client && npm install",
+    "install:server": "cd server && npm install",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build:client": "cd client && npm run build",
+    "setup": "npm run install:all && npm run setup:env",
+    "setup:env": "node setup-env.js"
+  },
+  "keywords": ["game", "threejs", "multiplayer", "roguelite", "fantasy"],
+  "author": "",
+  "license": "ISC"
+}
