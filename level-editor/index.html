@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klyra Level Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-dark: #1a1a2e;
+            --bg-panel: #16213e;
+            --bg-header: #0f3460;
+            --accent: #f0a500;
+            --text: #ffffff;
+            --text-dim: #a0a0a0;
+            --border: #2a2a4e;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Main Layout */
+        #app {
+            display: grid;
+            grid-template-rows: 40px 1fr 200px 30px;
+            grid-template-columns: 280px 1fr 300px;
+            height: 100vh;
+        }
+
+        /* Top Toolbar */
+        #toolbar {
+            grid-column: 1 / -1;
+            background: var(--bg-header);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .toolbar-group {
+            display: flex;
+            gap: 5px;
+            padding: 0 10px;
+            border-right: 1px solid var(--border);
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+        }
+
+        .toolbar-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-btn:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: var(--border);
+        }
+
+        .toolbar-btn.active {
+            background: var(--accent);
+            color: var(--bg-dark);
+        }
+
+        .toolbar-title {
+            font-weight: bold;
+            color: var(--accent);
+            margin-right: 20px;
+            font-size: 16px;
+        }
+
+        /* Left Panel - Asset Browser */
+        #left-panel {
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: var(--bg-header);
+            padding: 10px 15px;
+            font-weight: bold;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        /* Asset Categories */
+        .asset-category {
+            margin-bottom: 15px;
+        }
+
+        .category-header {
+            background: var(--bg-header);
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .category-header:hover {
+            background: var(--accent);
+            color: var(--bg-dark);
+        }
+
+        .asset-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .asset-item {
+            background: rgba(255,255,255,0.05);
+            border: 2px solid transparent;
+            border-radius: 6px;
+            padding: 10px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .asset-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: var(--accent);
+        }
+
+        .asset-item.selected {
+            border-color: var(--accent);
+            background: rgba(240,165,0,0.2);
+        }
+
+        .asset-icon {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .asset-name {
+            font-size: 10px;
+            color: var(--text-dim);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Viewport */
+        #viewport {
+            position: relative;
+            background: #0a0a15;
+        }
+
+        #viewport canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #viewport-controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        /* Right Panel - Properties */
+        #right-panel {
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .property-group {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .property-group-title {
+            font-size: 11px;
+            color: var(--accent);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .property-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .property-label {
+            width: 70px;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .property-input {
+            flex: 1;
+            display: flex;
+            gap: 5px;
+        }
+
+        .property-input input {
+            width: 100%;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .property-input input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .xyz-input {
+            display: flex;
+            gap: 3px;
+        }
+
+        .xyz-input input {
+            width: 60px;
+            text-align: center;
+        }
+
+        .xyz-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-bottom: 2px;
+            text-align: center;
+        }
+
+        /* Hierarchy/Scene Tree */
+        #scene-tree {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .tree-item {
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tree-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .tree-item.selected {
+            background: rgba(240,165,0,0.2);
+            border-left: 3px solid var(--accent);
+        }
+
+        .tree-icon {
+            font-size: 14px;
+        }
+
+        /* Status Bar */
+        #status-bar {
+            grid-column: 1 / -1;
+            background: var(--bg-header);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            font-size: 11px;
+            color: var(--text-dim);
+            border-top: 1px solid var(--border);
+            justify-content: space-between;
+        }
+
+        .status-group {
+            display: flex;
+            gap: 20px;
+        }
+
+        /* Terrain Tools Panel */
+        #terrain-tools {
+            padding: 10px;
+        }
+
+        .terrain-tool-btn {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 5px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 12px;
+        }
+
+        .terrain-tool-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .terrain-tool-btn.active {
+            background: var(--accent);
+            color: var(--bg-dark);
+        }
+
+        .slider-row {
+            margin: 10px 0;
+        }
+
+        .slider-row label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-bottom: 5px;
+        }
+
+        .slider-row input[type="range"] {
+            width: 100%;
+        }
+
+        /* Tabs */
+        .tab-container {
+            display: flex;
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab {
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 12px;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .tab.active {
+            border-bottom-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .tab-panel {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .tab-panel.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
+        }
+
+        /* Content Browser (Bottom Panel) */
+        #content-browser {
+            grid-column: 1 / -1;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        #content-browser .tab-container {
+            flex-shrink: 0;
+        }
+
+        #content-browser-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        #content-categories {
+            width: 180px;
+            background: var(--bg-dark);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+        }
+
+        .content-category-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-left: 3px solid transparent;
+        }
+
+        .content-category-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .content-category-item.active {
+            background: rgba(240,165,0,0.1);
+            border-left-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .content-category-item .count {
+            margin-left: auto;
+            background: var(--bg-header);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+
+        #content-assets {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-content: flex-start;
+        }
+
+        .content-asset-item {
+            width: 80px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid transparent;
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .content-asset-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: var(--accent);
+        }
+
+        .content-asset-item.selected {
+            border-color: var(--accent);
+            background: rgba(240,165,0,0.2);
+        }
+
+        .content-asset-item .asset-icon {
+            font-size: 32px;
+            margin-bottom: 5px;
+        }
+
+        .content-asset-item .asset-name {
+            font-size: 9px;
+            color: var(--text-dim);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #content-search {
+            display: flex;
+            align-items: center;
+            padding: 5px 10px;
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+        }
+
+        #content-search input {
+            flex: 1;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        #content-search input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Toolbar -->
+        <div id="toolbar">
+            <span class="toolbar-title">Klyra Level Editor</span>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="btn-new" title="New Level">New</button>
+                <button class="toolbar-btn" id="btn-open" title="Open Level">Open</button>
+                <button class="toolbar-btn" id="btn-save" title="Save Level">Save</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+                <button class="toolbar-btn" id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn active" id="btn-select" title="Select (Q)">Select</button>
+                <button class="toolbar-btn" id="btn-move" title="Move (W)">Move</button>
+                <button class="toolbar-btn" id="btn-rotate" title="Rotate (E)">Rotate</button>
+                <button class="toolbar-btn" id="btn-scale" title="Scale (R)">Scale</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="btn-snap" title="Toggle Snap">Snap: Off</button>
+                <button class="toolbar-btn" id="btn-grid" title="Toggle Grid">Grid</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="btn-play" title="Test Level">Play</button>
+            </div>
+        </div>
+
+        <!-- Left Panel - Tools & Terrain -->
+        <div id="left-panel">
+            <div class="tab-container">
+                <div class="tab active" data-tab="terrain">Terrain</div>
+                <div class="tab" data-tab="tools">Tools</div>
+            </div>
+
+            <!-- Terrain Tab -->
+            <div id="tab-terrain" class="tab-panel active">
+                <div id="terrain-tools">
+                    <button class="terrain-tool-btn" data-tool="raise">Raise Terrain</button>
+                    <button class="terrain-tool-btn" data-tool="lower">Lower Terrain</button>
+                    <button class="terrain-tool-btn" data-tool="smooth">Smooth Terrain</button>
+                    <button class="terrain-tool-btn" data-tool="flatten">Flatten Terrain</button>
+
+                    <div class="slider-row">
+                        <label>Brush Size: <span id="brush-size-val">5</span></label>
+                        <input type="range" id="brush-size" min="1" max="20" value="5">
+                    </div>
+
+                    <div class="slider-row">
+                        <label>Brush Strength: <span id="brush-strength-val">0.5</span></label>
+                        <input type="range" id="brush-strength" min="0.1" max="1" step="0.1" value="0.5">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools Tab -->
+            <div id="tab-tools" class="tab-panel">
+                <div class="panel-content">
+                    <div class="asset-category">
+                        <div class="category-header">Spawn Points</div>
+                        <div class="asset-grid">
+                            <div class="asset-item" data-type="spawn" data-spawn="player">
+                                <div class="asset-icon">🎮</div>
+                                <div class="asset-name">Player Spawn</div>
+                            </div>
+                            <div class="asset-item" data-type="spawn" data-spawn="enemy">
+                                <div class="asset-icon">👹</div>
+                                <div class="asset-name">Enemy Spawn</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="asset-category">
+                        <div class="category-header">Triggers</div>
+                        <div class="asset-grid">
+                            <div class="asset-item" data-type="trigger" data-trigger="zone">
+                                <div class="asset-icon">🔲</div>
+                                <div class="asset-name">Trigger Zone</div>
+                            </div>
+                            <div class="asset-item" data-type="trigger" data-trigger="portal">
+                                <div class="asset-icon">🌀</div>
+                                <div class="asset-name">Portal</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="asset-category">
+                        <div class="category-header">Lighting</div>
+                        <div class="asset-grid">
+                            <div class="asset-item" data-type="light" data-light="point">
+                                <div class="asset-icon">💡</div>
+                                <div class="asset-name">Point Light</div>
+                            </div>
+                            <div class="asset-item" data-type="light" data-light="spot">
+                                <div class="asset-icon">🔦</div>
+                                <div class="asset-name">Spot Light</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Viewport -->
+        <div id="viewport">
+            <canvas id="editor-canvas"></canvas>
+            <div id="viewport-controls">
+                LMB: Select | RMB: Orbit | MMB: Pan | Scroll: Zoom
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div id="right-panel">
+            <div class="panel-header">Properties</div>
+
+            <div class="property-group" id="transform-properties">
+                <div class="property-group-title">Transform</div>
+
+                <div class="property-row">
+                    <span class="property-label">Position</span>
+                    <div class="property-input xyz-input">
+                        <div><div class="xyz-label">X</div><input type="number" id="pos-x" step="0.1" value="0"></div>
+                        <div><div class="xyz-label">Y</div><input type="number" id="pos-y" step="0.1" value="0"></div>
+                        <div><div class="xyz-label">Z</div><input type="number" id="pos-z" step="0.1" value="0"></div>
+                    </div>
+                </div>
+
+                <div class="property-row">
+                    <span class="property-label">Rotation</span>
+                    <div class="property-input xyz-input">
+                        <div><div class="xyz-label">X</div><input type="number" id="rot-x" step="1" value="0"></div>
+                        <div><div class="xyz-label">Y</div><input type="number" id="rot-y" step="1" value="0"></div>
+                        <div><div class="xyz-label">Z</div><input type="number" id="rot-z" step="1" value="0"></div>
+                    </div>
+                </div>
+
+                <div class="property-row">
+                    <span class="property-label">Scale</span>
+                    <div class="property-input xyz-input">
+                        <div><div class="xyz-label">X</div><input type="number" id="scale-x" step="0.1" value="1"></div>
+                        <div><div class="xyz-label">Y</div><input type="number" id="scale-y" step="0.1" value="1"></div>
+                        <div><div class="xyz-label">Z</div><input type="number" id="scale-z" step="0.1" value="1"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="property-group" id="object-properties">
+                <div class="property-group-title">Object</div>
+                <div class="property-row">
+                    <span class="property-label">Name</span>
+                    <div class="property-input">
+                        <input type="text" id="obj-name" value="">
+                    </div>
+                </div>
+                <div class="property-row">
+                    <span class="property-label">Type</span>
+                    <div class="property-input">
+                        <input type="text" id="obj-type" value="" readonly>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-header">Scene Hierarchy</div>
+            <div id="scene-tree">
+                <!-- Scene objects will be listed here -->
+            </div>
+        </div>
+
+        <!-- Content Browser (Bottom Panel) -->
+        <div id="content-browser">
+            <div id="content-search">
+                <input type="text" id="asset-search" placeholder="Search assets...">
+            </div>
+            <div id="content-browser-content">
+                <div id="content-categories">
+                    <!-- Categories populated by JS -->
+                </div>
+                <div id="content-assets">
+                    <!-- Assets populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar">
+            <div class="status-group">
+                <span>Objects: <span id="object-count">0</span></span>
+                <span>Selected: <span id="selected-name">None</span></span>
+            </div>
+            <div class="status-group">
+                <span id="cursor-pos">X: 0 Y: 0 Z: 0</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

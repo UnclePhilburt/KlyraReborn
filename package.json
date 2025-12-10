@@ -4,16 +4,32 @@
   "type": "module",
   "description": "10 player co-op fantasy roguelite game",
   "scripts": {
-    "install:all": "npm run install:client && npm run install:server",
+    "install:all": "npm run install:client && npm run install:server && npm run install:editor",
     "install:client": "cd client && npm install",
     "install:server": "cd server && npm install",
+    "install:editor": "cd level-editor && npm install",
     "dev:client": "cd client && npm run dev",
     "dev:server": "cd server && npm run dev",
+    "dev:editor": "cd level-editor && npm run dev",
     "build:client": "cd client && npm run build",
     "setup": "npm run install:all && npm run setup:env",
     "setup:env": "node setup-env.js"
   },
-  "keywords": ["game", "threejs", "multiplayer", "roguelite", "fantasy"],
+  "keywords": [
+    "game",
+    "threejs",
+    "multiplayer",
+    "roguelite",
+    "fantasy"
+  ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@splinetool/loader": "^1.12.6"
+  },
+  "devDependencies": {
+    "jimp": "^1.6.0",
+    "sharp": "^0.34.5",
+    "tga": "^1.0.7"
+  }
 }

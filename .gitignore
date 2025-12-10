@@ -17,8 +17,9 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+nul
 
-# Large source files (FBX, animations)
+# Large source files (original Synty packs - not needed)
 POLYGON_Fantasy_Kingdom_SourceFiles_v4/
 ANIMATION_Base_Locomotion_SourceFiles_v3/
 glbcharacters/

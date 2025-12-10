@@ -5,6 +5,7 @@ import { WorldManager } from './game/WorldManager.js';
 import { UIManager } from './ui/UIManager.js';
 import { AssetLoader } from './loaders/AssetLoader.js';
 import { CharacterSelector } from './ui/CharacterSelector.js';
+import { MainMenu } from './ui/MainMenu.js';
 
 class Game {
     constructor() {
@@ -17,12 +18,19 @@ class Game {
         this.worldManager = null;
         this.uiManager = null;
         this.assetLoader = null;
+        this.mainMenu = null;
         this.characterSelector = null;
         this.selectedCharacter = null;
         this.players = new Map();
         this.isLoaded = false;
 
-        this.showCharacterSelection();
+        this.showMainMenu();
+    }
+
+    showMainMenu() {
+        this.mainMenu = new MainMenu(() => {
+            this.showCharacterSelection();
+        });
     }
 
     async init() {
@@ -54,10 +62,10 @@ class Game {
 
         this.uiManager.updateLoadingProgress(60, 'Creating player...');
 
-        // Initialize player with asset loader
+        // Initialize player with asset loader and world manager for collision
         // Always use polygonesyntycharacter for the skeleton (has all the bones)
         // TODO: Later we can swap the mesh to selectedCharacter while keeping the skeleton
-        this.playerController = new PlayerController(this.scene, this.camera, this.assetLoader);
+        this.playerController = new PlayerController(this.scene, this.camera, this.assetLoader, this.worldManager);
         await this.playerController.init('polygonesyntycharacter');
 
         this.uiManager.updateLoadingProgress(80, 'Final setup...');
