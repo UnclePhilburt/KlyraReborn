@@ -99,9 +99,34 @@ class LevelEditor {
         this.brushCursor = null;
         this.isPainting = false;
 
+        // Chunk system for huge worlds
+        this.chunkSize = 100; // Each chunk is 100x100 units
+        this.currentChunkX = 0;
+        this.currentChunkZ = 0;
+        this.worldData = {}; // Stores all chunk data: { "0,0": { terrain, objects, splatmap }, ... }
+        this.loadedChunks = {}; // Currently loaded chunk meshes for rendering neighbors
+        this.worldMapVisible = false;
+        this.worldName = 'New World';
+
         // Raycaster
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
+
+        // Play mode
+        this.isPlayMode = false;
+        this.playerCamera = null;
+        this.playerHeight = 1.8;
+        this.playerSpeed = 10;
+        this.mouseSensitivity = 0.002;
+        this.playerVelocity = new THREE.Vector3();
+        this.playerDirection = new THREE.Vector3();
+        this.moveForward = false;
+        this.moveBackward = false;
+        this.moveLeft = false;
+        this.moveRight = false;
+        this.canJump = true;
+        this.euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        this.prevTime = performance.now();
 
         this.init();
     }
@@ -518,15 +543,28 @@ class LevelEditor {
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
 
+        // Play mode controls
+        document.addEventListener('keydown', (e) => this.onPlayModeKeyDown(e));
+        document.addEventListener('keyup', (e) => this.onPlayModeKeyUp(e));
+        document.addEventListener('mousemove', (e) => this.onPlayModeMouseMove(e));
+
+        // Handle pointer lock change (exit play mode if pointer unlocked by ESC)
+        document.addEventListener('pointerlockchange', () => {
+            if (this.isPlayMode && document.pointerLockElement !== this.renderer.domElement) {
+                // Pointer was unlocked, but don't exit play mode automatically
+                // User can click Stop button or press ESC again
+            }
+        });
+
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
         });
 
         // Toolbar buttons
-        document.getElementById('btn-new').addEventListener('click', () => this.newLevel());
-        document.getElementById('btn-open').addEventListener('click', () => this.openLevel());
-        document.getElementById('btn-save').addEventListener('click', () => this.saveLevel());
+        document.getElementById('btn-new').addEventListener('click', () => this.newWorld());
+        document.getElementById('btn-open').addEventListener('click', () => this.openWorld());
+        document.getElementById('btn-save').addEventListener('click', () => this.saveWorld());
         document.getElementById('btn-undo').addEventListener('click', () => this.undo());
         document.getElementById('btn-redo').addEventListener('click', () => this.redo());
         document.getElementById('btn-select').addEventListener('click', () => this.setTool('select'));
@@ -536,6 +574,17 @@ class LevelEditor {
         document.getElementById('btn-snap').addEventListener('click', () => this.toggleSnap());
         document.getElementById('btn-grid').addEventListener('click', () => this.toggleGrid());
         document.getElementById('btn-play').addEventListener('click', () => this.testLevel());
+
+        // Chunk navigation buttons
+        document.getElementById('btn-chunk-north').addEventListener('click', () => this.navigateChunk('north'));
+        document.getElementById('btn-chunk-south').addEventListener('click', () => this.navigateChunk('south'));
+        document.getElementById('btn-chunk-east').addEventListener('click', () => this.navigateChunk('east'));
+        document.getElementById('btn-chunk-west').addEventListener('click', () => this.navigateChunk('west'));
+        document.getElementById('btn-world-map').addEventListener('click', () => this.toggleWorldMap());
+
+        // World map overlay
+        document.getElementById('world-map-close').addEventListener('click', () => this.toggleWorldMap());
+        document.getElementById('world-map-canvas').addEventListener('click', (e) => this.onWorldMapClick(e));
 
         // Property inputs
         ['pos-x', 'pos-y', 'pos-z', 'rot-x', 'rot-y', 'rot-z', 'scale-x', 'scale-y', 'scale-z'].forEach(id => {
@@ -1650,13 +1699,18 @@ class LevelEditor {
             case 'KeyS':
                 if (e.ctrlKey) {
                     e.preventDefault();
-                    this.saveLevel();
+                    this.saveWorld();
                 }
                 break;
             case 'KeyD':
                 if (e.ctrlKey && this.selectedObject) {
                     e.preventDefault();
                     this.duplicateSelected();
+                }
+                break;
+            case 'KeyM':
+                if (!e.ctrlKey) {
+                    this.toggleWorldMap();
                 }
                 break;
         }
@@ -1848,7 +1902,8 @@ class LevelEditor {
         const positions = this.terrain.geometry.attributes.position;
         const heights = [];
         for (let i = 0; i < positions.count; i++) {
-            heights.push(positions.getY(i));
+            // Terrain is rotated -90° on X, so local Z is world height
+            heights.push(positions.getZ(i));
         }
         return { heights };
     }
@@ -1862,10 +1917,10 @@ class LevelEditor {
         this.levelObjects.forEach(obj => this.scene.remove(obj));
         this.levelObjects = [];
 
-        // Reset terrain
+        // Reset terrain (Z is height due to rotation)
         const positions = this.terrain.geometry.attributes.position;
         for (let i = 0; i < positions.count; i++) {
-            positions.setY(i, 0);
+            positions.setZ(i, 0);
         }
         positions.needsUpdate = true;
         this.terrain.geometry.computeVertexNormals();
@@ -1922,12 +1977,12 @@ class LevelEditor {
         this.levelObjects = [];
         this.deselectObject();
 
-        // Load terrain
+        // Load terrain (Z is height due to rotation)
         if (data.terrain && data.terrain.heights) {
             const positions = this.terrain.geometry.attributes.position;
             data.terrain.heights.forEach((h, i) => {
                 if (i < positions.count) {
-                    positions.setY(i, h);
+                    positions.setZ(i, h);
                 }
             });
             positions.needsUpdate = true;
@@ -1945,6 +2000,7 @@ class LevelEditor {
 
     createObjectFromData(objData) {
         let obj;
+        const fileToLoad = objData.file;
 
         // Find asset definition
         const category = this.assetCategories[objData.type];
@@ -1961,9 +2017,6 @@ class LevelEditor {
                     new THREE.BoxGeometry(1, 2, 1),
                     new THREE.MeshStandardMaterial({ color: 0x888888 })
                 );
-                if (asset.file) {
-                    this.loadGLBForObject(asset.file, obj);
-                }
             }
         } else {
             // Fallback
@@ -1980,15 +2033,34 @@ class LevelEditor {
             id: objData.id || THREE.MathUtils.generateUUID(),
             type: objData.type,
             assetName: objData.assetName,
-            file: objData.file
+            file: fileToLoad || asset?.file
         };
 
         this.scene.add(obj);
         this.levelObjects.push(obj);
+
+        // Load GLB after userData is set (so path can be determined)
+        if (obj.userData.file && asset && asset.type !== 'primitive' && asset.type !== 'prefab') {
+            this.loadGLBForObject(obj.userData.file, obj);
+        }
     }
 
     loadGLBForObject(filename, targetObj) {
-        const path = `/assets/characters/${filename}`;
+        // Determine path based on object type
+        const type = targetObj.userData?.type || 'buildings';
+        const pathMap = {
+            buildings: 'buildings',
+            props: 'props',
+            trees: 'nature/trees',
+            rocks: 'nature/rocks',
+            grass: 'nature/grass',
+            flowers: 'nature/flowers',
+            environment: 'environment',
+            characters: 'characters'
+        };
+        const folder = pathMap[type] || 'buildings';
+        const path = `/assets/${folder}/${filename}`;
+
         this.gltfLoader.load(
             path,
             (gltf) => {
@@ -2024,18 +2096,606 @@ class LevelEditor {
     }
 
     testLevel() {
-        // Save and open in game
-        const data = this.serializeLevel();
-        localStorage.setItem('testLevel', JSON.stringify(data));
-        window.open('../client/index.html?level=test', '_blank');
+        // Toggle play mode
+        if (this.isPlayMode) {
+            this.exitPlayMode();
+        } else {
+            this.enterPlayMode();
+        }
+    }
+
+    enterPlayMode() {
+        this.isPlayMode = true;
+
+        // Hide editor UI
+        document.getElementById('left-panel').style.display = 'none';
+        document.getElementById('right-panel').style.display = 'none';
+        document.getElementById('toolbar').style.opacity = '0.3';
+
+        // Update button text
+        document.getElementById('btn-play').textContent = 'Stop';
+        document.getElementById('btn-play').style.background = '#e74c3c';
+
+        // Disable orbit controls
+        this.orbitControls.enabled = false;
+
+        // Hide transform controls
+        if (this.transformControls.object) {
+            this.transformControls.detach();
+        }
+
+        // Hide grid
+        this.gridHelper.visible = false;
+
+        // Hide brush cursor
+        if (this.brushCursor) {
+            this.brushCursor.visible = false;
+        }
+
+        // Create player camera at current camera position
+        this.playerCamera = new THREE.PerspectiveCamera(
+            75,
+            this.renderer.domElement.width / this.renderer.domElement.height,
+            0.1,
+            1000
+        );
+
+        // Position player at center of terrain, at player height
+        this.playerCamera.position.set(0, this.playerHeight, 0);
+        this.playerCamera.rotation.set(0, 0, 0);
+
+        // Reset movement state
+        this.moveForward = false;
+        this.moveBackward = false;
+        this.moveLeft = false;
+        this.moveRight = false;
+        this.playerVelocity.set(0, 0, 0);
+
+        // Lock pointer for mouse look
+        this.renderer.domElement.requestPointerLock();
+
+        // Show play mode instructions
+        this.showPlayModeOverlay();
+
+        console.log('Entered play mode - WASD to move, mouse to look, ESC to exit');
+    }
+
+    exitPlayMode() {
+        this.isPlayMode = false;
+
+        // Show editor UI
+        document.getElementById('left-panel').style.display = '';
+        document.getElementById('right-panel').style.display = '';
+        document.getElementById('toolbar').style.opacity = '1';
+
+        // Update button text
+        document.getElementById('btn-play').textContent = 'Play';
+        document.getElementById('btn-play').style.background = '';
+
+        // Re-enable orbit controls
+        this.orbitControls.enabled = true;
+
+        // Show grid if it was visible
+        this.gridHelper.visible = this.gridVisible;
+
+        // Exit pointer lock
+        document.exitPointerLock();
+
+        // Remove play mode overlay
+        this.hidePlayModeOverlay();
+
+        // Clean up player camera
+        this.playerCamera = null;
+
+        console.log('Exited play mode');
+    }
+
+    showPlayModeOverlay() {
+        let overlay = document.getElementById('play-mode-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'play-mode-overlay';
+            overlay.innerHTML = `
+                <div style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                            background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
+                            border-radius: 5px; font-family: sans-serif; z-index: 1000;">
+                    <strong>PLAY MODE</strong> - WASD: Move | Mouse: Look | ESC or Click Stop: Exit
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'block';
+    }
+
+    hidePlayModeOverlay() {
+        const overlay = document.getElementById('play-mode-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+
+    onPlayModeKeyDown(event) {
+        if (!this.isPlayMode) return;
+
+        switch (event.code) {
+            case 'KeyW': this.moveForward = true; break;
+            case 'KeyS': this.moveBackward = true; break;
+            case 'KeyA': this.moveLeft = true; break;
+            case 'KeyD': this.moveRight = true; break;
+            case 'Space':
+                if (this.canJump) {
+                    this.playerVelocity.y = 8;
+                    this.canJump = false;
+                }
+                break;
+            case 'Escape':
+                this.exitPlayMode();
+                break;
+        }
+    }
+
+    onPlayModeKeyUp(event) {
+        if (!this.isPlayMode) return;
+
+        switch (event.code) {
+            case 'KeyW': this.moveForward = false; break;
+            case 'KeyS': this.moveBackward = false; break;
+            case 'KeyA': this.moveLeft = false; break;
+            case 'KeyD': this.moveRight = false; break;
+        }
+    }
+
+    onPlayModeMouseMove(event) {
+        if (!this.isPlayMode || !this.playerCamera) return;
+        if (document.pointerLockElement !== this.renderer.domElement) return;
+
+        const movementX = event.movementX || 0;
+        const movementY = event.movementY || 0;
+
+        this.euler.setFromQuaternion(this.playerCamera.quaternion);
+        this.euler.y -= movementX * this.mouseSensitivity;
+        this.euler.x -= movementY * this.mouseSensitivity;
+
+        // Clamp vertical look
+        this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
+
+        this.playerCamera.quaternion.setFromEuler(this.euler);
+    }
+
+    updatePlayMode(delta) {
+        if (!this.isPlayMode || !this.playerCamera) return;
+
+        // Apply gravity
+        this.playerVelocity.y -= 20 * delta;
+
+        // Get movement direction
+        this.playerDirection.z = Number(this.moveForward) - Number(this.moveBackward);
+        this.playerDirection.x = Number(this.moveRight) - Number(this.moveLeft);
+        this.playerDirection.normalize();
+
+        // Move in camera direction
+        if (this.moveForward || this.moveBackward) {
+            const forward = new THREE.Vector3();
+            this.playerCamera.getWorldDirection(forward);
+            forward.y = 0;
+            forward.normalize();
+            this.playerCamera.position.addScaledVector(forward, this.playerDirection.z * this.playerSpeed * delta);
+        }
+
+        if (this.moveLeft || this.moveRight) {
+            const right = new THREE.Vector3();
+            this.playerCamera.getWorldDirection(right);
+            right.y = 0;
+            right.normalize();
+            right.cross(new THREE.Vector3(0, 1, 0));
+            this.playerCamera.position.addScaledVector(right, this.playerDirection.x * this.playerSpeed * delta);
+        }
+
+        // Apply gravity
+        this.playerCamera.position.y += this.playerVelocity.y * delta;
+
+        // Get terrain height at player position
+        const terrainHeight = this.getTerrainHeightAt(this.playerCamera.position.x, this.playerCamera.position.z);
+        const groundLevel = terrainHeight + this.playerHeight;
+
+        // Ground collision
+        if (this.playerCamera.position.y < groundLevel) {
+            this.playerCamera.position.y = groundLevel;
+            this.playerVelocity.y = 0;
+            this.canJump = true;
+        }
+
+        // Keep player in bounds
+        const bound = 48;
+        this.playerCamera.position.x = Math.max(-bound, Math.min(bound, this.playerCamera.position.x));
+        this.playerCamera.position.z = Math.max(-bound, Math.min(bound, this.playerCamera.position.z));
+    }
+
+    getTerrainHeightAt(x, z) {
+        if (!this.terrain) return 0;
+
+        const positions = this.terrain.geometry.attributes.position;
+        const size = 100;
+        const segments = 100;
+
+        // Convert world position to grid position
+        const gridX = ((x + size / 2) / size) * segments;
+        const gridZ = ((z + size / 2) / size) * segments;
+
+        // Get integer grid coordinates
+        const x0 = Math.floor(gridX);
+        const z0 = Math.floor(gridZ);
+        const x1 = Math.min(x0 + 1, segments);
+        const z1 = Math.min(z0 + 1, segments);
+
+        // Clamp to valid range
+        const cx0 = Math.max(0, Math.min(segments, x0));
+        const cz0 = Math.max(0, Math.min(segments, z0));
+        const cx1 = Math.max(0, Math.min(segments, x1));
+        const cz1 = Math.max(0, Math.min(segments, z1));
+
+        // Get heights at corners (remember: terrain is rotated, so Y in geometry is height which maps to world Y)
+        // With -90 degree X rotation: local Z becomes world Y (height)
+        const getHeight = (gx, gz) => {
+            const index = gz * (segments + 1) + gx;
+            return positions.getZ(index); // Z is height due to rotation
+        };
+
+        const h00 = getHeight(cx0, cz0);
+        const h10 = getHeight(cx1, cz0);
+        const h01 = getHeight(cx0, cz1);
+        const h11 = getHeight(cx1, cz1);
+
+        // Bilinear interpolation
+        const fx = gridX - x0;
+        const fz = gridZ - z0;
+
+        const h0 = h00 * (1 - fx) + h10 * fx;
+        const h1 = h01 * (1 - fx) + h11 * fx;
+
+        return h0 * (1 - fz) + h1 * fz;
+    }
+
+    // ==================== CHUNK SYSTEM ====================
+
+    getChunkKey(x, z) {
+        return `${x},${z}`;
+    }
+
+    saveCurrentChunk() {
+        const key = this.getChunkKey(this.currentChunkX, this.currentChunkZ);
+
+        // Serialize terrain heights
+        const positions = this.terrain.geometry.attributes.position;
+        const heights = [];
+        for (let i = 0; i < positions.count; i++) {
+            heights.push(positions.getZ(i));
+        }
+
+        // Serialize splatmap
+        const splatmapData = this.splatmapCanvas.toDataURL('image/png');
+
+        // Serialize objects (only those in this chunk)
+        const objects = this.levelObjects.map(obj => ({
+            id: obj.userData.id,
+            type: obj.userData.type,
+            assetName: obj.userData.assetName,
+            file: obj.userData.file,
+            position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
+            rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z },
+            scale: { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z }
+        }));
+
+        this.worldData[key] = {
+            terrain: { heights },
+            splatmap: splatmapData,
+            objects: objects
+        };
+
+        console.log(`Saved chunk ${key} with ${objects.length} objects`);
+    }
+
+    loadChunk(chunkX, chunkZ) {
+        const key = this.getChunkKey(chunkX, chunkZ);
+        const data = this.worldData[key];
+
+        // Clear current objects
+        this.levelObjects.forEach(obj => this.scene.remove(obj));
+        this.levelObjects = [];
+        this.deselectObject();
+
+        if (data) {
+            // Load terrain heights
+            if (data.terrain && data.terrain.heights) {
+                const positions = this.terrain.geometry.attributes.position;
+                data.terrain.heights.forEach((h, i) => {
+                    if (i < positions.count) {
+                        positions.setZ(i, h);
+                    }
+                });
+                positions.needsUpdate = true;
+                this.terrain.geometry.computeVertexNormals();
+            }
+
+            // Load splatmap
+            if (data.splatmap) {
+                const img = new Image();
+                img.onload = () => {
+                    this.splatmapContext.drawImage(img, 0, 0);
+                    this.splatmapTexture.needsUpdate = true;
+                    if (this.terrainShader) {
+                        this.terrainShader.uniforms.splatmap.value = this.splatmapTexture;
+                    }
+                };
+                img.src = data.splatmap;
+            }
+
+            // Load objects
+            if (data.objects) {
+                data.objects.forEach(objData => {
+                    this.createObjectFromData(objData);
+                });
+            }
+
+            console.log(`Loaded chunk ${key} with ${data.objects?.length || 0} objects`);
+        } else {
+            // New chunk - reset terrain to flat
+            const positions = this.terrain.geometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                positions.setZ(i, 0);
+            }
+            positions.needsUpdate = true;
+            this.terrain.geometry.computeVertexNormals();
+
+            // Reset splatmap to grass
+            const imageData = this.splatmapContext.createImageData(512, 512);
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                imageData.data[i] = 255;     // R - grass
+                imageData.data[i + 1] = 0;   // G
+                imageData.data[i + 2] = 0;   // B
+                imageData.data[i + 3] = 255; // A
+            }
+            this.splatmapContext.putImageData(imageData, 0, 0);
+            this.splatmapTexture.needsUpdate = true;
+
+            console.log(`Created new chunk ${key}`);
+        }
+
+        this.currentChunkX = chunkX;
+        this.currentChunkZ = chunkZ;
+        this.updateChunkDisplay();
+        this.updateSceneTree();
+        this.updateStatusBar();
+    }
+
+    switchToChunk(chunkX, chunkZ) {
+        // Save current chunk first
+        this.saveCurrentChunk();
+
+        // Load the new chunk
+        this.loadChunk(chunkX, chunkZ);
+
+        // Update camera position to center of new chunk
+        // (Keep relative position within chunk)
+    }
+
+    navigateChunk(direction) {
+        let newX = this.currentChunkX;
+        let newZ = this.currentChunkZ;
+
+        switch (direction) {
+            case 'north': newZ--; break;
+            case 'south': newZ++; break;
+            case 'east': newX++; break;
+            case 'west': newX--; break;
+        }
+
+        this.switchToChunk(newX, newZ);
+    }
+
+    updateChunkDisplay() {
+        const display = document.getElementById('chunk-display');
+        if (display) {
+            display.textContent = `Chunk: (${this.currentChunkX}, ${this.currentChunkZ})`;
+        }
+    }
+
+    toggleWorldMap() {
+        this.worldMapVisible = !this.worldMapVisible;
+        const worldMap = document.getElementById('world-map-overlay');
+        if (worldMap) {
+            worldMap.classList.toggle('visible', this.worldMapVisible);
+            if (this.worldMapVisible) {
+                this.renderWorldMap();
+            }
+        }
+    }
+
+    renderWorldMap() {
+        const canvas = document.getElementById('world-map-canvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const cellSize = 40;
+        const viewRange = 5; // Show 5x5 grid of chunks
+
+        canvas.width = cellSize * (viewRange * 2 + 1);
+        canvas.height = cellSize * (viewRange * 2 + 1);
+
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw chunk grid
+        for (let dz = -viewRange; dz <= viewRange; dz++) {
+            for (let dx = -viewRange; dx <= viewRange; dx++) {
+                const chunkX = this.currentChunkX + dx;
+                const chunkZ = this.currentChunkZ + dz;
+                const key = this.getChunkKey(chunkX, chunkZ);
+
+                const px = (dx + viewRange) * cellSize;
+                const pz = (dz + viewRange) * cellSize;
+
+                // Check if chunk has data
+                const hasData = this.worldData[key];
+                const isCurrent = dx === 0 && dz === 0;
+
+                if (isCurrent) {
+                    ctx.fillStyle = '#4ade80'; // Green for current
+                } else if (hasData) {
+                    ctx.fillStyle = '#3b82f6'; // Blue for edited
+                } else {
+                    ctx.fillStyle = '#374151'; // Gray for empty
+                }
+
+                ctx.fillRect(px + 1, pz + 1, cellSize - 2, cellSize - 2);
+
+                // Draw coordinates
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${chunkX},${chunkZ}`, px + cellSize/2, pz + cellSize/2 + 4);
+            }
+        }
+
+        // Draw grid lines
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= viewRange * 2 + 1; i++) {
+            ctx.beginPath();
+            ctx.moveTo(i * cellSize, 0);
+            ctx.lineTo(i * cellSize, canvas.height);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, i * cellSize);
+            ctx.lineTo(canvas.width, i * cellSize);
+            ctx.stroke();
+        }
+    }
+
+    onWorldMapClick(event) {
+        const canvas = document.getElementById('world-map-canvas');
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        const cellSize = 40;
+        const viewRange = 5;
+
+        const cellX = Math.floor(x / cellSize) - viewRange;
+        const cellZ = Math.floor(y / cellSize) - viewRange;
+
+        const targetChunkX = this.currentChunkX + cellX;
+        const targetChunkZ = this.currentChunkZ + cellZ;
+
+        this.switchToChunk(targetChunkX, targetChunkZ);
+        this.renderWorldMap();
+    }
+
+    getWorldStats() {
+        const chunkCount = Object.keys(this.worldData).length;
+        let totalObjects = 0;
+        for (const key in this.worldData) {
+            totalObjects += this.worldData[key].objects?.length || 0;
+        }
+        return { chunkCount, totalObjects };
+    }
+
+    // Save entire world to file
+    saveWorld() {
+        // Save current chunk first
+        this.saveCurrentChunk();
+
+        const worldExport = {
+            version: '2.0',
+            name: this.worldName,
+            currentChunk: { x: this.currentChunkX, z: this.currentChunkZ },
+            chunks: this.worldData
+        };
+
+        const json = JSON.stringify(worldExport);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${this.worldName.replace(/\s+/g, '_')}.world.json`;
+        a.click();
+
+        URL.revokeObjectURL(url);
+
+        const stats = this.getWorldStats();
+        console.log(`World saved! ${stats.chunkCount} chunks, ${stats.totalObjects} total objects`);
+    }
+
+    // Load entire world from file
+    openWorld() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+
+                    if (data.version === '2.0' && data.chunks) {
+                        // New world format
+                        this.worldData = data.chunks;
+                        this.worldName = data.name || 'Loaded World';
+                        this.loadChunk(data.currentChunk?.x || 0, data.currentChunk?.z || 0);
+
+                        const stats = this.getWorldStats();
+                        console.log(`World loaded! ${stats.chunkCount} chunks, ${stats.totalObjects} total objects`);
+                    } else {
+                        // Legacy single-level format - import as chunk 0,0
+                        this.worldData = {};
+                        this.worldData['0,0'] = {
+                            terrain: data.terrain,
+                            objects: data.objects,
+                            splatmap: null
+                        };
+                        this.loadChunk(0, 0);
+                        console.log('Legacy level imported as chunk 0,0');
+                    }
+                } catch (err) {
+                    alert('Failed to load world: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
+    newWorld() {
+        if (Object.keys(this.worldData).length > 0 || this.levelObjects.length > 0) {
+            if (!confirm('Create new world? All unsaved chunks will be lost.')) return;
+        }
+
+        this.worldData = {};
+        this.worldName = 'New World';
+        this.loadChunk(0, 0);
     }
 
     // Animation loop
     animate() {
         requestAnimationFrame(() => this.animate());
 
-        this.orbitControls.update();
-        this.renderer.render(this.scene, this.camera);
+        const time = performance.now();
+        const delta = (time - this.prevTime) / 1000;
+        this.prevTime = time;
+
+        if (this.isPlayMode) {
+            this.updatePlayMode(delta);
+            this.renderer.render(this.scene, this.playerCamera);
+        } else {
+            this.orbitControls.update();
+            this.renderer.render(this.scene, this.camera);
+        }
     }
 }
 

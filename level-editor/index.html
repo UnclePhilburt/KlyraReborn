@@ -511,6 +511,95 @@
             flex-direction: column;
         }
 
+        /* Chunk Navigation */
+        .chunk-nav {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .chunk-btn {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .chunk-display {
+            font-size: 11px;
+            color: var(--accent);
+            padding: 0 8px;
+            min-width: 90px;
+            text-align: center;
+        }
+
+        /* World Map Overlay */
+        #world-map-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        #world-map-overlay.visible {
+            display: flex;
+        }
+
+        #world-map-header {
+            color: var(--accent);
+            font-size: 24px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        #world-map-container {
+            background: var(--bg-panel);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            position: relative;
+        }
+
+        #world-map-canvas {
+            display: block;
+            cursor: pointer;
+        }
+
+        #world-map-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 24px;
+            cursor: pointer;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            text-align: center;
+            border-radius: 4px;
+        }
+
+        #world-map-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        #world-map-instructions {
+            color: var(--text-dim);
+            font-size: 12px;
+            margin-top: 15px;
+            text-align: center;
+        }
+
         /* Scrollbar styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -659,9 +748,18 @@
             <span class="toolbar-title">Klyra Level Editor</span>
 
             <div class="toolbar-group">
-                <button class="toolbar-btn" id="btn-new" title="New Level">New</button>
-                <button class="toolbar-btn" id="btn-open" title="Open Level">Open</button>
-                <button class="toolbar-btn" id="btn-save" title="Save Level">Save</button>
+                <button class="toolbar-btn" id="btn-new" title="New World">New</button>
+                <button class="toolbar-btn" id="btn-open" title="Open World">Open</button>
+                <button class="toolbar-btn" id="btn-save" title="Save World">Save</button>
+            </div>
+
+            <div class="toolbar-group chunk-nav">
+                <button class="toolbar-btn chunk-btn" id="btn-chunk-north" title="Go North">N</button>
+                <button class="toolbar-btn chunk-btn" id="btn-chunk-west" title="Go West">W</button>
+                <span id="chunk-display" class="chunk-display">Chunk: (0, 0)</span>
+                <button class="toolbar-btn chunk-btn" id="btn-chunk-east" title="Go East">E</button>
+                <button class="toolbar-btn chunk-btn" id="btn-chunk-south" title="Go South">S</button>
+                <button class="toolbar-btn" id="btn-world-map" title="World Map (M)">Map</button>
             </div>
 
             <div class="toolbar-group">
@@ -682,7 +780,7 @@
             </div>
 
             <div class="toolbar-group">
-                <button class="toolbar-btn" id="btn-play" title="Test Level">Play</button>
+                <button class="toolbar-btn" id="btn-play" type="button" title="Test Level">Play</button>
             </div>
         </div>
 
@@ -879,6 +977,16 @@
                 <span id="cursor-pos">X: 0 Y: 0 Z: 0</span>
             </div>
         </div>
+    </div>
+
+    <!-- World Map Overlay -->
+    <div id="world-map-overlay">
+        <div id="world-map-header">World Map</div>
+        <div id="world-map-container">
+            <button id="world-map-close">&times;</button>
+            <canvas id="world-map-canvas" width="500" height="500"></canvas>
+        </div>
+        <div id="world-map-instructions">Click a chunk to navigate | Current chunk highlighted in gold | Green = has content</div>
     </div>
 
     <script type="module" src="/src/main.js"></script>
