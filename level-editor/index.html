@@ -356,6 +356,127 @@
             width: 100%;
         }
 
+        /* Terrain Texture Selector */
+        .terrain-texture-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border);
+        }
+
+        .section-label {
+            display: block;
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+
+        .terrain-texture-group {
+            margin-bottom: 10px;
+        }
+
+        .texture-group-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .terrain-texture-grid {
+            display: flex;
+            gap: 5px;
+        }
+
+        .terrain-texture-btn {
+            width: 32px;
+            height: 32px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .terrain-texture-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .terrain-texture-btn.active {
+            background: var(--accent);
+            color: var(--bg-dark);
+            border-color: var(--accent);
+        }
+
+        /* Paint Texture Buttons */
+        .terrain-paint-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border);
+        }
+
+        .paint-texture-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .paint-texture-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 8px;
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .paint-texture-btn:hover {
+            border-color: var(--accent);
+            transform: scale(1.02);
+        }
+
+        .paint-texture-btn.active {
+            border-color: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .paint-texture-btn .texture-icon {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+
+        .paint-texture-btn .texture-name {
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .paint-mode-btn {
+            background: #2a5a3a !important;
+            margin-bottom: 10px;
+        }
+
+        .paint-mode-btn.active {
+            background: #4a9a5a !important;
+            border-color: #6aba7a !important;
+        }
+
+        .paint-instructions {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            color: var(--text-dim);
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
         /* Tabs */
         .tab-container {
             display: flex;
@@ -575,10 +696,34 @@
             <!-- Terrain Tab -->
             <div id="tab-terrain" class="tab-panel active">
                 <div id="terrain-tools">
+                    <div class="section-label">Sculpt Tools</div>
                     <button class="terrain-tool-btn" data-tool="raise">Raise Terrain</button>
                     <button class="terrain-tool-btn" data-tool="lower">Lower Terrain</button>
                     <button class="terrain-tool-btn" data-tool="smooth">Smooth Terrain</button>
                     <button class="terrain-tool-btn" data-tool="flatten">Flatten Terrain</button>
+
+                    <div class="terrain-paint-section">
+                        <label class="section-label">Paint Textures</label>
+                        <button class="terrain-tool-btn paint-mode-btn" data-tool="paint">Paint Mode</button>
+
+                        <div class="paint-textures">
+                            <div class="texture-group-label">Select Texture to Paint</div>
+                            <div class="paint-texture-grid">
+                                <button class="paint-texture-btn active" data-index="0" title="Grass" style="background: linear-gradient(135deg, #4a7c4e, #3a6a3e);">
+                                    <span class="texture-icon">🌿</span>
+                                    <span class="texture-name">Grass</span>
+                                </button>
+                                <button class="paint-texture-btn" data-index="1" title="Mud" style="background: linear-gradient(135deg, #5c4a3a, #4a3a2a);">
+                                    <span class="texture-icon">🟫</span>
+                                    <span class="texture-name">Mud</span>
+                                </button>
+                                <button class="paint-texture-btn" data-index="2" title="Sand" style="background: linear-gradient(135deg, #c4a76c, #b49758);">
+                                    <span class="texture-icon">🏖️</span>
+                                    <span class="texture-name">Sand</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
 
                     <div class="slider-row">
                         <label>Brush Size: <span id="brush-size-val">5</span></label>
@@ -588,6 +733,10 @@
                     <div class="slider-row">
                         <label>Brush Strength: <span id="brush-strength-val">0.5</span></label>
                         <input type="range" id="brush-strength" min="0.1" max="1" step="0.1" value="0.5">
+                    </div>
+
+                    <div class="paint-instructions">
+                        <small>Click "Paint Mode" then left-click and drag on terrain to paint the selected texture.</small>
                     </div>
                 </div>
             </div>

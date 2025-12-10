@@ -89,6 +89,16 @@ class LevelEditor {
         this.brushSize = 5;
         this.brushStrength = 0.5;
 
+        // Terrain painting
+        this.paintMode = false;
+        this.selectedPaintTexture = 0; // Index of texture to paint (0-3)
+        this.splatmapCanvas = null;
+        this.splatmapContext = null;
+        this.splatmapTexture = null;
+        this.terrainTextures = []; // Array of loaded textures for painting
+        this.brushCursor = null;
+        this.isPainting = false;
+
         // Raycaster
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
@@ -149,23 +159,27 @@ class LevelEditor {
 
     setupLights() {
         // Ambient light
-        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
         this.scene.add(ambient);
 
-        // Directional light
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(50, 50, 50);
-        dirLight.castShadow = true;
-        dirLight.shadow.camera.left = -50;
-        dirLight.shadow.camera.right = 50;
-        dirLight.shadow.camera.top = 50;
-        dirLight.shadow.camera.bottom = -50;
-        dirLight.shadow.mapSize.width = 2048;
-        dirLight.shadow.mapSize.height = 2048;
-        this.scene.add(dirLight);
+        // Directional light (sun)
+        this.dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        this.dirLight.position.set(50, 80, 50);
+        this.dirLight.castShadow = true;
+        this.dirLight.shadow.camera.left = -60;
+        this.dirLight.shadow.camera.right = 60;
+        this.dirLight.shadow.camera.top = 60;
+        this.dirLight.shadow.camera.bottom = -60;
+        this.dirLight.shadow.camera.near = 0.5;
+        this.dirLight.shadow.camera.far = 200;
+        this.dirLight.shadow.mapSize.width = 4096;
+        this.dirLight.shadow.mapSize.height = 4096;
+        this.dirLight.shadow.bias = -0.0005;
+        this.dirLight.shadow.normalBias = 0.02;
+        this.scene.add(this.dirLight);
 
-        // Hemisphere light
-        const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x5d4e37, 0.3);
+        // Hemisphere light for ambient fill
+        const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x5d4e37, 0.4);
         this.scene.add(hemiLight);
     }
 
@@ -202,20 +216,292 @@ class LevelEditor {
     }
 
     setupTerrain() {
-        // Create editable terrain
-        const geometry = new THREE.PlaneGeometry(100, 100, 100, 100);
-        const material = new THREE.MeshStandardMaterial({
-            color: 0x4a7c4e,
-            roughness: 0.8,
-            metalness: 0.1,
-            wireframe: false
+        // Ground texture options for painting (3 texture channels: R, G, B)
+        this.paintableTextures = [
+            { name: 'Grass', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Grass_01.png', color: '#4a7c4e' },
+            { name: 'Mud', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Mud_01.png', color: '#5c4a3a' },
+            { name: 'Sand', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Sand_01.png', color: '#c4a76c' }
+        ];
+
+        // Create splatmap canvas (stores which texture to use at each point)
+        const splatmapSize = 512;
+        this.splatmapCanvas = document.createElement('canvas');
+        this.splatmapCanvas.width = splatmapSize;
+        this.splatmapCanvas.height = splatmapSize;
+        this.splatmapContext = this.splatmapCanvas.getContext('2d');
+
+        // Initialize splatmap with first texture (red channel = 255, others = 0)
+        // We use RGB channels only (3 textures max for simplicity), alpha stays at 255
+        const imageData = this.splatmapContext.createImageData(splatmapSize, splatmapSize);
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            imageData.data[i] = 255;     // R - texture 0 (grass)
+            imageData.data[i + 1] = 0;   // G - texture 1 (mud)
+            imageData.data[i + 2] = 0;   // B - texture 2 (sand)
+            imageData.data[i + 3] = 255; // A - always 255 (opaque)
+        }
+        this.splatmapContext.putImageData(imageData, 0, 0);
+
+        // Create Three.js texture from canvas
+        this.splatmapTexture = new THREE.CanvasTexture(this.splatmapCanvas);
+        this.splatmapTexture.wrapS = THREE.ClampToEdgeWrapping;
+        this.splatmapTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+        // Load terrain textures
+        const loadTexture = (path) => {
+            const tex = this.textureLoader.load(path);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(20, 20);
+            return tex;
+        };
+
+        this.terrainTextures = this.paintableTextures.map(t => loadTexture(t.diffuse));
+
+        // Create custom material for terrain splatmap blending with shadow support
+        // Use MeshLambertMaterial with onBeforeCompile to inject splatmap logic
+        const terrainMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffffff
         });
 
-        this.terrain = new THREE.Mesh(geometry, material);
+        // Store references for the shader modification
+        const splatmapTex = this.splatmapTexture;
+        const tex0 = this.terrainTextures[0];
+        const tex1 = this.terrainTextures[1];
+        const tex2 = this.terrainTextures[2];
+
+        terrainMaterial.onBeforeCompile = (shader) => {
+            // Add custom uniforms
+            shader.uniforms.splatmap = { value: splatmapTex };
+            shader.uniforms.texture0 = { value: tex0 };
+            shader.uniforms.texture1 = { value: tex1 };
+            shader.uniforms.texture2 = { value: tex2 };
+            shader.uniforms.textureScale = { value: 20.0 };
+
+            // Add uniform declarations to vertex shader
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <common>',
+                `#include <common>
+                varying vec2 vUvTerrain;
+                varying vec2 vUvScaled;
+                uniform float textureScale;`
+            );
+
+            // Add UV passing in vertex shader
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <uv_vertex>',
+                `#include <uv_vertex>
+                vUvTerrain = uv;
+                vUvScaled = uv * textureScale;`
+            );
+
+            // Add uniform declarations to fragment shader
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <common>',
+                `#include <common>
+                uniform sampler2D splatmap;
+                uniform sampler2D texture0;
+                uniform sampler2D texture1;
+                uniform sampler2D texture2;
+                varying vec2 vUvTerrain;
+                varying vec2 vUvScaled;`
+            );
+
+            // Replace the diffuse color calculation with splatmap blending
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <map_fragment>',
+                `// Splatmap terrain blending
+                vec4 splat = texture2D(splatmap, vUvTerrain);
+                vec4 t0 = texture2D(texture0, vUvScaled);
+                vec4 t1 = texture2D(texture1, vUvScaled);
+                vec4 t2 = texture2D(texture2, vUvScaled);
+
+                float totalWeight = splat.r + splat.g + splat.b;
+                vec4 terrainColor;
+                if (totalWeight > 0.0) {
+                    terrainColor = (t0 * splat.r + t1 * splat.g + t2 * splat.b) / totalWeight;
+                } else {
+                    terrainColor = t0;
+                }
+                diffuseColor *= terrainColor;`
+            );
+
+            // Store shader reference for texture updates
+            this.terrainShader = shader;
+        };
+
+        // Need to mark for update when splatmap changes
+        terrainMaterial.needsUpdate = true;
+
+        // Create terrain mesh
+        const geometry = new THREE.PlaneGeometry(100, 100, 100, 100);
+        this.terrain = new THREE.Mesh(geometry, terrainMaterial);
         this.terrain.rotation.x = -Math.PI / 2;
         this.terrain.receiveShadow = true;
         this.terrain.userData.isTerrain = true;
         this.scene.add(this.terrain);
+
+        // Create brush cursor (circular indicator)
+        this.createBrushCursor();
+    }
+
+    createBrushCursor() {
+        const cursorGeometry = new THREE.RingGeometry(0.9, 1.0, 32);
+        const cursorMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffff00,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.8
+        });
+        this.brushCursor = new THREE.Mesh(cursorGeometry, cursorMaterial);
+        this.brushCursor.rotation.x = -Math.PI / 2;
+        this.brushCursor.visible = false;
+        this.brushCursor.position.y = 0.1;
+        this.scene.add(this.brushCursor);
+    }
+
+    updateBrushCursor(worldPosition) {
+        if (!this.brushCursor) return;
+
+        // Scale cursor to match brush size
+        const scale = this.brushSize;
+        this.brushCursor.scale.set(scale, scale, scale);
+
+        // Position cursor at paint location
+        this.brushCursor.position.x = worldPosition.x;
+        this.brushCursor.position.z = worldPosition.z;
+        this.brushCursor.position.y = worldPosition.y + 0.1;
+    }
+
+    setPaintMode(enabled) {
+        this.paintMode = enabled;
+        this.brushCursor.visible = enabled;
+
+        // Update UI
+        document.querySelectorAll('.terrain-tool-btn').forEach(btn => {
+            btn.classList.toggle('active', enabled && btn.dataset.tool === 'paint');
+        });
+
+        // Update cursor style
+        if (enabled) {
+            this.renderer.domElement.style.cursor = 'crosshair';
+        } else {
+            this.renderer.domElement.style.cursor = 'default';
+        }
+    }
+
+    selectPaintTexture(index) {
+        this.selectedPaintTexture = index;
+
+        // Update UI
+        document.querySelectorAll('.paint-texture-btn').forEach((btn, i) => {
+            btn.classList.toggle('active', i === index);
+        });
+    }
+
+    paintTerrain(worldPosition) {
+        if (!this.paintMode || !this.splatmapCanvas) return;
+        if (this.selectedPaintTexture > 2) return; // Only 3 textures (RGB)
+
+        const canvas = this.splatmapCanvas;
+        const ctx = this.splatmapContext;
+
+        // Convert world position to canvas pixel coordinates
+        // Terrain is 100x100 plane centered at origin, rotated -90° on X
+        // Match shader UV by flipping the splatmap texture in the shader instead
+        const px = ((worldPosition.x + 50) / 100) * canvas.width;
+        const py = ((worldPosition.z + 50) / 100) * canvas.height;
+
+        // Brush radius in pixels
+        const brushRadiusPx = (this.brushSize / 100) * canvas.width;
+
+        // Get current image data in brush area
+        const minX = Math.max(0, Math.floor(px - brushRadiusPx));
+        const minY = Math.max(0, Math.floor(py - brushRadiusPx));
+        const maxX = Math.min(canvas.width, Math.ceil(px + brushRadiusPx));
+        const maxY = Math.min(canvas.height, Math.ceil(py + brushRadiusPx));
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        if (width <= 0 || height <= 0) return;
+
+        const imageData = ctx.getImageData(minX, minY, width, height);
+        const data = imageData.data;
+
+        // Paint each pixel in brush radius
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const canvasX = minX + x;
+                const canvasY = minY + y;
+
+                // Calculate distance from brush center
+                const dx = canvasX - px;
+                const dy = canvasY - py;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > brushRadiusPx) continue;
+
+                // Falloff (smoother edges)
+                const falloff = 1 - (dist / brushRadiusPx);
+                const strength = this.brushStrength * falloff * 0.15;
+
+                const i = (y * width + x) * 4;
+
+                // Get current RGB channel values (ignore alpha)
+                let r = data[i];
+                let g = data[i + 1];
+                let b = data[i + 2];
+
+                // Add to selected channel
+                const addAmount = Math.round(strength * 255);
+
+                if (this.selectedPaintTexture === 0) {
+                    r = Math.min(255, r + addAmount);
+                } else if (this.selectedPaintTexture === 1) {
+                    g = Math.min(255, g + addAmount);
+                } else if (this.selectedPaintTexture === 2) {
+                    b = Math.min(255, b + addAmount);
+                }
+
+                // Normalize RGB so they sum to 255 (keeps weights balanced)
+                const total = r + g + b;
+                if (total > 0) {
+                    const scale = 255 / total;
+                    r = Math.round(r * scale);
+                    g = Math.round(g * scale);
+                    b = Math.round(b * scale);
+                }
+
+                // Write back (keep alpha at 255)
+                data[i] = r;
+                data[i + 1] = g;
+                data[i + 2] = b;
+                data[i + 3] = 255;
+            }
+        }
+
+        ctx.putImageData(imageData, minX, minY);
+
+        // Update Three.js texture
+        this.splatmapTexture.needsUpdate = true;
+
+        // Also update shader uniform if available
+        if (this.terrainShader) {
+            this.terrainShader.uniforms.splatmap.value = this.splatmapTexture;
+        }
+    }
+
+    // Legacy method for compatibility - now just enters paint mode
+    setTerrainTexture(textureKey) {
+        // Map old texture keys to new paint texture indices
+        const keyToIndex = {
+            'grass1': 0, 'grass2': 0, 'grass3': 0, 'grassDark': 3,
+            'mud1': 1, 'mud2': 1, 'mud3': 1,
+            'sand1': 2, 'sand2': 2, 'sand3': 2
+        };
+
+        const index = keyToIndex[textureKey] ?? 0;
+        this.selectPaintTexture(index);
+        this.setPaintMode(true);
     }
 
     setupEventListeners() {
@@ -256,12 +542,39 @@ class LevelEditor {
             document.getElementById(id).addEventListener('change', () => this.onPropertyChange());
         });
 
-        // Terrain tools
-        document.querySelectorAll('.terrain-tool-btn').forEach(btn => {
+        // Terrain tools (sculpt)
+        document.querySelectorAll('.terrain-tool-btn:not(.paint-mode-btn)').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.terrain-tool-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.terrainTool = btn.dataset.tool;
+                // If selecting a sculpt tool, disable paint mode
+                if (btn.dataset.tool !== 'paint') {
+                    this.setPaintMode(false);
+                    document.querySelectorAll('.terrain-tool-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.terrainTool = btn.dataset.tool;
+                }
+            });
+        });
+
+        // Paint mode button
+        const paintModeBtn = document.querySelector('.paint-mode-btn');
+        if (paintModeBtn) {
+            paintModeBtn.addEventListener('click', () => {
+                const newPaintMode = !this.paintMode;
+                this.setPaintMode(newPaintMode);
+                paintModeBtn.classList.toggle('active', newPaintMode);
+
+                // Clear other terrain tools when entering paint mode
+                if (newPaintMode) {
+                    this.terrainTool = null;
+                    document.querySelectorAll('.terrain-tool-btn:not(.paint-mode-btn)').forEach(b => b.classList.remove('active'));
+                }
+            });
+        }
+
+        // Paint texture selection
+        document.querySelectorAll('.paint-texture-btn').forEach((btn, index) => {
+            btn.addEventListener('click', () => {
+                this.selectPaintTexture(parseInt(btn.dataset.index));
             });
         });
 
@@ -273,6 +586,13 @@ class LevelEditor {
         document.getElementById('brush-strength').addEventListener('input', (e) => {
             this.brushStrength = parseFloat(e.target.value);
             document.getElementById('brush-strength-val').textContent = this.brushStrength;
+        });
+
+        // Terrain texture selector (legacy - now enters paint mode)
+        document.querySelectorAll('.terrain-texture-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.setTerrainTexture(btn.dataset.texture);
+            });
         });
     }
 
@@ -291,12 +611,50 @@ class LevelEditor {
         this.textures.branches = loadTexture('/assets/textures/meadow/Branches_01.png');
         this.textures.clover = loadTexture('/assets/textures/meadow/cloverMat_01.png');
         this.textures.cropField = loadTexture('/assets/textures/meadow/CropField_01.png');
+        this.textures.rock = loadTexture('/assets/textures/meadow/Rock_Moss_Texture_01.png');
+        this.textures.flowers = loadTexture('/assets/textures/meadow/Grass_Flowers_Texture_01.png');
 
         // Keep reference for backward compatibility
         this.meadowTexture = this.textures.meadow;
 
-        // Buildings (8 GLB assets)
+        // Buildings (42 GLB assets)
         this.assetCategories.buildings.assets = [
+            // Preset Buildings
+            { name: 'Blacksmith', file: 'SM_Bld_Preset_Blacksmith_01_Optimized.glb', path: 'buildings', icon: '🔨', type: 'glb' },
+            { name: 'Church A', file: 'SM_Bld_Preset_Church_01_A_Optimized.glb', path: 'buildings', icon: '⛪', type: 'glb' },
+            { name: 'Church B', file: 'SM_Bld_Preset_Church_01_B_Optimized.glb', path: 'buildings', icon: '⛪', type: 'glb' },
+            { name: 'House 1A', file: 'SM_Bld_Preset_House_01_A_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 2A', file: 'SM_Bld_Preset_House_02_A_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 3', file: 'SM_Bld_Preset_House_03_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 4', file: 'SM_Bld_Preset_House_04_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 5', file: 'SM_Bld_Preset_House_05_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 6', file: 'SM_Bld_Preset_House_06_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 7', file: 'SM_Bld_Preset_House_07_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 8', file: 'SM_Bld_Preset_House_08_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 9A', file: 'SM_Bld_Preset_House_09_A_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 9B', file: 'SM_Bld_Preset_House_09_B_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 9C', file: 'SM_Bld_Preset_House_09_C_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 10', file: 'SM_Bld_Preset_House_10_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'House 10 Base', file: 'SM_Bld_Preset_House_10_Base_Optimized.glb', path: 'buildings', icon: '🏠', type: 'glb' },
+            { name: 'Archway 1', file: 'SM_Bld_Preset_House_Archway_01_Optimized.glb', path: 'buildings', icon: '🚪', type: 'glb' },
+            { name: 'Archway 1 Wing 1', file: 'SM_Bld_Preset_House_Archway_01_Wing_01_Optimized.glb', path: 'buildings', icon: '🚪', type: 'glb' },
+            { name: 'Archway 1 Wing 2', file: 'SM_Bld_Preset_House_Archway_01_Wing_02_Optimized.glb', path: 'buildings', icon: '🚪', type: 'glb' },
+            { name: 'Archway 2', file: 'SM_Bld_Preset_House_Archway_02_Optimized.glb', path: 'buildings', icon: '🚪', type: 'glb' },
+            { name: 'House Windmill', file: 'SM_Bld_Preset_House_Windmill_01_Optimized.glb', path: 'buildings', icon: '🏭', type: 'glb' },
+            { name: 'House Windmill Base', file: 'SM_Bld_Preset_House_Windmill_01_Base_Optimized.glb', path: 'buildings', icon: '🏭', type: 'glb' },
+            { name: 'House Windmill Blades', file: 'SM_Bld_Preset_House_Windmill_01_Blades_Optimized.glb', path: 'buildings', icon: '🏭', type: 'glb' },
+            { name: 'Hut 1', file: 'SM_Bld_Preset_Hut_01_Optimized.glb', path: 'buildings', icon: '🛖', type: 'glb' },
+            { name: 'Hut 2', file: 'SM_Bld_Preset_Hut_02_Optimized.glb', path: 'buildings', icon: '🛖', type: 'glb' },
+            { name: 'Outhouse', file: 'SM_Bld_Preset_Outhouse_01_Optimized.glb', path: 'buildings', icon: '🚽', type: 'glb' },
+            { name: 'Shelter 1', file: 'SM_Bld_Preset_Shelter_01_Optimized.glb', path: 'buildings', icon: '🏚️', type: 'glb' },
+            { name: 'Shelter 2', file: 'SM_Bld_Preset_Shelter_02_Optimized.glb', path: 'buildings', icon: '🏚️', type: 'glb' },
+            { name: 'Stables', file: 'SM_Bld_Preset_Stables_01_Optimized.glb', path: 'buildings', icon: '🐴', type: 'glb' },
+            { name: 'Stables Piece', file: 'SM_Bld_Preset_Stables_01_Optimized_Piece_01.glb', path: 'buildings', icon: '🐴', type: 'glb' },
+            { name: 'Tavern', file: 'SM_Bld_Preset_Tavern_01_Optimized.glb', path: 'buildings', icon: '🍺', type: 'glb' },
+            { name: 'Tavern Base', file: 'SM_Bld_Preset_Tavern_01_Base_Optimized.glb', path: 'buildings', icon: '🍺', type: 'glb' },
+            { name: 'Tavern Stairs', file: 'SM_Bld_Preset_Tavern_01_Stairs_Optimized.glb', path: 'buildings', icon: '🍺', type: 'glb' },
+            { name: 'Tower', file: 'SM_Bld_Preset_Tower_01_Optimized.glb', path: 'buildings', icon: '🗼', type: 'glb' },
+            // Original Buildings
             { name: 'Stone Cabin', file: 'SM_Bld_Stone_Cabin_01.glb', path: 'buildings', icon: '🏠', type: 'glb' },
             { name: 'Warpgate', file: 'SM_Bld_Warpgate_01.glb', path: 'buildings', icon: '🌀', type: 'glb' },
             { name: 'Warpgate Inner Ring', file: 'SM_Bld_Warpgate_01_InnerRing_01.glb', path: 'buildings', icon: '🌀', type: 'glb' },
@@ -407,122 +765,106 @@ class LevelEditor {
             { name: 'Wind Chime 2', file: 'SM_Prop_WindChime_02.FBX', path: 'props', icon: '🎐', type: 'fbx' }
         ];
 
-        // Trees & Bushes (15 assets - 3 GLB + 12 FBX)
+        // Trees & Bushes (12 GLB assets)
         this.assetCategories.trees.assets = [
-            // GLB versions (embedded textures)
-            { name: 'Bush 1 (GLB)', file: 'SM_Env_Bush_01.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
-            { name: 'Bush 2 (GLB)', file: 'SM_Env_Bush_02.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
-            { name: 'Bush 3 (GLB)', file: 'SM_Env_Bush_03.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
-            // FBX versions
-            { name: 'Bush 1', file: 'SM_Env_Bush_01.FBX', path: 'nature/trees', icon: '🌿', type: 'fbx' },
-            { name: 'Bush 2', file: 'SM_Env_Bush_02.FBX', path: 'nature/trees', icon: '🌿', type: 'fbx' },
-            { name: 'Bush 3', file: 'SM_Env_Bush_03.FBX', path: 'nature/trees', icon: '🌿', type: 'fbx' },
-            // Trees
-            { name: 'Birch Tree 1', file: 'SM_Env_Tree_Birch_01.FBX', path: 'nature/trees', icon: '🌳', type: 'fbx' },
-            { name: 'Birch Tree 2', file: 'SM_Env_Tree_Birch_02.FBX', path: 'nature/trees', icon: '🌳', type: 'fbx' },
-            { name: 'Birch Tree 3', file: 'SM_Env_Tree_Birch_03.FBX', path: 'nature/trees', icon: '🌳', type: 'fbx' },
-            { name: 'Fruit Tree 1', file: 'SM_Env_Tree_Fruit_01.FBX', path: 'nature/trees', icon: '🍎', type: 'fbx' },
-            { name: 'Fruit Tree 2', file: 'SM_Env_Tree_Fruit_02.FBX', path: 'nature/trees', icon: '🍎', type: 'fbx' },
-            { name: 'Fruit Tree 3', file: 'SM_Env_Tree_Fruit_03.FBX', path: 'nature/trees', icon: '🍎', type: 'fbx' },
-            { name: 'Fruit Tree Fruit', file: 'SM_Env_Tree_Fruit_Fruit_01.FBX', path: 'nature/trees', icon: '🍎', type: 'fbx' },
-            { name: 'Meadow Tree 1', file: 'SM_Env_Tree_Meadow_01.FBX', path: 'nature/trees', icon: '🌲', type: 'fbx' },
-            { name: 'Meadow Tree 2', file: 'SM_Env_Tree_Meadow_02.FBX', path: 'nature/trees', icon: '🌲', type: 'fbx' }
+            { name: 'Bush 1', file: 'SM_Env_Bush_01.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
+            { name: 'Bush 2', file: 'SM_Env_Bush_02.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
+            { name: 'Bush 3', file: 'SM_Env_Bush_03.glb', path: 'nature/trees', icon: '🌿', type: 'glb' },
+            { name: 'Birch Tree 1', file: 'SM_Env_Tree_Birch_01.glb', path: 'nature/trees', icon: '🌳', type: 'glb' },
+            { name: 'Birch Tree 2', file: 'SM_Env_Tree_Birch_02.glb', path: 'nature/trees', icon: '🌳', type: 'glb' },
+            { name: 'Birch Tree 3', file: 'SM_Env_Tree_Birch_03.glb', path: 'nature/trees', icon: '🌳', type: 'glb' },
+            { name: 'Fruit Tree 1', file: 'SM_Env_Tree_Fruit_01.glb', path: 'nature/trees', icon: '🍎', type: 'glb' },
+            { name: 'Fruit Tree 2', file: 'SM_Env_Tree_Fruit_02.glb', path: 'nature/trees', icon: '🍎', type: 'glb' },
+            { name: 'Fruit Tree 3', file: 'SM_Env_Tree_Fruit_03.glb', path: 'nature/trees', icon: '🍎', type: 'glb' },
+            { name: 'Fruit Tree Fruit', file: 'SM_Env_Tree_Fruit_Fruit_01.glb', path: 'nature/trees', icon: '🍎', type: 'glb' },
+            { name: 'Meadow Tree 1', file: 'SM_Env_Tree_Meadow_01.glb', path: 'nature/trees', icon: '🌲', type: 'glb' },
+            { name: 'Meadow Tree 2', file: 'SM_Env_Tree_Meadow_02.glb', path: 'nature/trees', icon: '🌲', type: 'glb' }
         ];
 
-        // Rocks (22 assets - FBX)
+        // Rocks (22 GLB assets with embedded textures)
         this.assetCategories.rocks.assets = [
-            { name: 'Rock 1', file: 'SM_Env_Rock_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock 2', file: 'SM_Env_Rock_02.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock 3', file: 'SM_Env_Rock_03.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock 4', file: 'SM_Env_Rock_04.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock 5', file: 'SM_Env_Rock_05.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock 6', file: 'SM_Env_Rock_06.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Cliff 1', file: 'SM_Env_Rock_Cliff_01.FBX', path: 'nature/rocks', icon: '⛰️', type: 'fbx' },
-            { name: 'Rock Cliff 2', file: 'SM_Env_Rock_Cliff_02.FBX', path: 'nature/rocks', icon: '⛰️', type: 'fbx' },
-            { name: 'Rock Cliff 3', file: 'SM_Env_Rock_Cliff_03.FBX', path: 'nature/rocks', icon: '⛰️', type: 'fbx' },
-            { name: 'Rock Ground 1', file: 'SM_Env_Rock_Ground_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Ground 2', file: 'SM_Env_Rock_Ground_02.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 1', file: 'SM_Env_Rock_Pile_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 2', file: 'SM_Env_Rock_Pile_02.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 3', file: 'SM_Env_Rock_Pile_03.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 4', file: 'SM_Env_Rock_Pile_04.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 5', file: 'SM_Env_Rock_Pile_05.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 6', file: 'SM_Env_Rock_Pile_06.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Pile 7', file: 'SM_Env_Rock_Pile_07.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Round', file: 'SM_Env_Rock_Round_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Small', file: 'SM_Env_Rock_Small_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Small Pile 1', file: 'SM_Env_Rock_Small_Pile_01.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' },
-            { name: 'Rock Small Pile 2', file: 'SM_Env_Rock_Small_Pile_02.FBX', path: 'nature/rocks', icon: '🪨', type: 'fbx' }
+            { name: 'Rock 1', file: 'SM_Env_Rock_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock 2', file: 'SM_Env_Rock_02.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock 3', file: 'SM_Env_Rock_03.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock 4', file: 'SM_Env_Rock_04.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock 5', file: 'SM_Env_Rock_05.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock 6', file: 'SM_Env_Rock_06.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Cliff 1', file: 'SM_Env_Rock_Cliff_01.glb', path: 'nature/rocks', icon: '⛰️', type: 'glb' },
+            { name: 'Rock Cliff 2', file: 'SM_Env_Rock_Cliff_02.glb', path: 'nature/rocks', icon: '⛰️', type: 'glb' },
+            { name: 'Rock Cliff 3', file: 'SM_Env_Rock_Cliff_03.glb', path: 'nature/rocks', icon: '⛰️', type: 'glb' },
+            { name: 'Rock Ground 1', file: 'SM_Env_Rock_Ground_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Ground 2', file: 'SM_Env_Rock_Ground_02.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 1', file: 'SM_Env_Rock_Pile_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 2', file: 'SM_Env_Rock_Pile_02.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 3', file: 'SM_Env_Rock_Pile_03.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 4', file: 'SM_Env_Rock_Pile_04.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 5', file: 'SM_Env_Rock_Pile_05.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 6', file: 'SM_Env_Rock_Pile_06.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Pile 7', file: 'SM_Env_Rock_Pile_07.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Round', file: 'SM_Env_Rock_Round_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Small', file: 'SM_Env_Rock_Small_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Small Pile 1', file: 'SM_Env_Rock_Small_Pile_01.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' },
+            { name: 'Rock Small Pile 2', file: 'SM_Env_Rock_Small_Pile_02.glb', path: 'nature/rocks', icon: '🪨', type: 'glb' }
         ];
 
-        // Grass (29 assets - 8 GLB + 21 FBX)
+        // Grass (21 GLB assets with embedded textures)
         this.assetCategories.grass.assets = [
-            // GLB versions (embedded textures)
-            { name: 'Crop Field 1 (GLB)', file: 'SM_Env_CropField_Clump_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
-            { name: 'Grass Bush (GLB)', file: 'SM_Env_Grass_Bush_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
-            { name: 'Grass Large 1 (GLB)', file: 'SM_Env_Grass_Large_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
-            { name: 'Grass Large 2 (GLB)', file: 'SM_Env_Grass_Large_02.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
-            { name: 'Grass Large 3 (GLB)', file: 'SM_Env_Grass_Large_03.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
-            { name: 'Grass Large 4 (GLB)', file: 'SM_Env_Grass_Large_04.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
-            { name: 'Grass Med 1 (GLB)', file: 'SM_Env_Grass_Med_Clump_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
-            { name: 'Grass Med 2 (GLB)', file: 'SM_Env_Grass_Med_Clump_02.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
-            // FBX versions
-            { name: 'Crop Field 1', file: 'SM_Env_CropField_Clump_01.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Crop Field 2', file: 'SM_Env_CropField_Clump_02.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Bush', file: 'SM_Env_Grass_Bush_01.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Large 1', file: 'SM_Env_Grass_Large_01.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Large 2', file: 'SM_Env_Grass_Large_02.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Large 3', file: 'SM_Env_Grass_Large_03.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Large 4', file: 'SM_Env_Grass_Large_04.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Med 1', file: 'SM_Env_Grass_Med_Clump_01.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Med 2', file: 'SM_Env_Grass_Med_Clump_02.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Med 3', file: 'SM_Env_Grass_Med_Clump_03.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Med Plane', file: 'SM_Env_Grass_Med_Plane_01.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Short 1', file: 'SM_Env_Grass_Short_Clump_01.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Short 2', file: 'SM_Env_Grass_Short_Clump_02.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Short 3', file: 'SM_Env_Grass_Short_Clump_03.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Short Plane', file: 'SM_Env_Grass_Short_Plane_01.FBX', path: 'nature/grass', icon: '🌿', type: 'fbx' },
-            { name: 'Grass Tall 1', file: 'SM_Env_Grass_Tall_Clump_01.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Tall 2', file: 'SM_Env_Grass_Tall_Clump_02.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Tall 3', file: 'SM_Env_Grass_Tall_Clump_03.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Tall 4', file: 'SM_Env_Grass_Tall_Clump_04.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Tall 5', file: 'SM_Env_Grass_Tall_Clump_05.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' },
-            { name: 'Grass Tall Plane', file: 'SM_Env_Grass_Tall_Plane_01.FBX', path: 'nature/grass', icon: '🌾', type: 'fbx' }
+            { name: 'Crop Field 1', file: 'SM_Env_CropField_Clump_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Crop Field 2', file: 'SM_Env_CropField_Clump_02.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Bush', file: 'SM_Env_Grass_Bush_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Large 1', file: 'SM_Env_Grass_Large_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Large 2', file: 'SM_Env_Grass_Large_02.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Large 3', file: 'SM_Env_Grass_Large_03.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Large 4', file: 'SM_Env_Grass_Large_04.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Med 1', file: 'SM_Env_Grass_Med_Clump_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Med 2', file: 'SM_Env_Grass_Med_Clump_02.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Med 3', file: 'SM_Env_Grass_Med_Clump_03.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Med Plane', file: 'SM_Env_Grass_Med_Plane_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Short 1', file: 'SM_Env_Grass_Short_Clump_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Short 2', file: 'SM_Env_Grass_Short_Clump_02.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Short 3', file: 'SM_Env_Grass_Short_Clump_03.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Short Plane', file: 'SM_Env_Grass_Short_Plane_01.glb', path: 'nature/grass', icon: '🌿', type: 'glb' },
+            { name: 'Grass Tall 1', file: 'SM_Env_Grass_Tall_Clump_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Tall 2', file: 'SM_Env_Grass_Tall_Clump_02.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Tall 3', file: 'SM_Env_Grass_Tall_Clump_03.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Tall 4', file: 'SM_Env_Grass_Tall_Clump_04.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Tall 5', file: 'SM_Env_Grass_Tall_Clump_05.glb', path: 'nature/grass', icon: '🌾', type: 'glb' },
+            { name: 'Grass Tall Plane', file: 'SM_Env_Grass_Tall_Plane_01.glb', path: 'nature/grass', icon: '🌾', type: 'glb' }
         ];
 
-        // Flowers (15 assets - FBX)
+        // Flowers (15 GLB assets with embedded textures)
         this.assetCategories.flowers.assets = [
-            { name: 'Flowers Flat 1', file: 'SM_Env_Flowers_Flat_01.FBX', path: 'nature/flowers', icon: '🌸', type: 'fbx' },
-            { name: 'Flowers Flat 2', file: 'SM_Env_Flowers_Flat_02.FBX', path: 'nature/flowers', icon: '🌸', type: 'fbx' },
-            { name: 'Flowers Flat 3', file: 'SM_Env_Flowers_Flat_03.FBX', path: 'nature/flowers', icon: '🌸', type: 'fbx' },
-            { name: 'Lillies 1', file: 'SM_Env_Lillies_01.FBX', path: 'nature/flowers', icon: '🌷', type: 'fbx' },
-            { name: 'Lillies 2', file: 'SM_Env_Lillies_02.FBX', path: 'nature/flowers', icon: '🌷', type: 'fbx' },
-            { name: 'Lillies 3', file: 'SM_Env_Lillies_03.FBX', path: 'nature/flowers', icon: '🌷', type: 'fbx' },
-            { name: 'Rapeseed 1', file: 'SM_Env_Rapeseed_Clump_01.FBX', path: 'nature/flowers', icon: '🌻', type: 'fbx' },
-            { name: 'Rapeseed 2', file: 'SM_Env_Rapeseed_Clump_02.FBX', path: 'nature/flowers', icon: '🌻', type: 'fbx' },
-            { name: 'Sunflower', file: 'SM_Env_Sunflower_01.FBX', path: 'nature/flowers', icon: '🌻', type: 'fbx' },
-            { name: 'Wildflowers 1', file: 'SM_Env_Wildflowers_01.FBX', path: 'nature/flowers', icon: '🌼', type: 'fbx' },
-            { name: 'Wildflowers 2', file: 'SM_Env_Wildflowers_02.FBX', path: 'nature/flowers', icon: '🌼', type: 'fbx' },
-            { name: 'Wildflowers 3', file: 'SM_Env_Wildflowers_03.FBX', path: 'nature/flowers', icon: '🌼', type: 'fbx' },
-            { name: 'Wildflowers Patch 1', file: 'SM_Env_Wildflowers_Patch_01.FBX', path: 'nature/flowers', icon: '🌺', type: 'fbx' },
-            { name: 'Wildflowers Patch 2', file: 'SM_Env_Wildflowers_Patch_02.FBX', path: 'nature/flowers', icon: '🌺', type: 'fbx' },
-            { name: 'Wildflowers Patch 3', file: 'SM_Env_Wildflowers_Patch_03.FBX', path: 'nature/flowers', icon: '🌺', type: 'fbx' }
+            { name: 'Flowers Flat 1', file: 'SM_Env_Flowers_Flat_01.glb', path: 'nature/flowers', icon: '🌸', type: 'glb' },
+            { name: 'Flowers Flat 2', file: 'SM_Env_Flowers_Flat_02.glb', path: 'nature/flowers', icon: '🌸', type: 'glb' },
+            { name: 'Flowers Flat 3', file: 'SM_Env_Flowers_Flat_03.glb', path: 'nature/flowers', icon: '🌸', type: 'glb' },
+            { name: 'Lillies 1', file: 'SM_Env_Lillies_01.glb', path: 'nature/flowers', icon: '🌷', type: 'glb' },
+            { name: 'Lillies 2', file: 'SM_Env_Lillies_02.glb', path: 'nature/flowers', icon: '🌷', type: 'glb' },
+            { name: 'Lillies 3', file: 'SM_Env_Lillies_03.glb', path: 'nature/flowers', icon: '🌷', type: 'glb' },
+            { name: 'Rapeseed 1', file: 'SM_Env_Rapeseed_Clump_01.glb', path: 'nature/flowers', icon: '🌻', type: 'glb' },
+            { name: 'Rapeseed 2', file: 'SM_Env_Rapeseed_Clump_02.glb', path: 'nature/flowers', icon: '🌻', type: 'glb' },
+            { name: 'Sunflower', file: 'SM_Env_Sunflower_01.glb', path: 'nature/flowers', icon: '🌻', type: 'glb' },
+            { name: 'Wildflowers 1', file: 'SM_Env_Wildflowers_01.glb', path: 'nature/flowers', icon: '🌼', type: 'glb' },
+            { name: 'Wildflowers 2', file: 'SM_Env_Wildflowers_02.glb', path: 'nature/flowers', icon: '🌼', type: 'glb' },
+            { name: 'Wildflowers 3', file: 'SM_Env_Wildflowers_03.glb', path: 'nature/flowers', icon: '🌼', type: 'glb' },
+            { name: 'Wildflowers Patch 1', file: 'SM_Env_Wildflowers_Patch_01.glb', path: 'nature/flowers', icon: '🌺', type: 'glb' },
+            { name: 'Wildflowers Patch 2', file: 'SM_Env_Wildflowers_Patch_02.glb', path: 'nature/flowers', icon: '🌺', type: 'glb' },
+            { name: 'Wildflowers Patch 3', file: 'SM_Env_Wildflowers_Patch_03.glb', path: 'nature/flowers', icon: '🌺', type: 'glb' }
         ];
 
-        // Environment (12 assets - FBX)
+        // Environment (12 GLB assets with embedded textures)
         this.assetCategories.environment.assets = [
-            { name: 'Background Hill', file: 'SM_Env_Background_Hill_01_SM_Env_Background_Hill_01.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Cloud Ring', file: 'SM_Env_CloudRing_Larger_01.FBX', path: 'environment', icon: '☁️', type: 'fbx' },
-            { name: 'Ground Cliff 1', file: 'SM_Env_Ground_Cliff_Large_01.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Ground Cliff 2', file: 'SM_Env_Ground_Cliff_Large_02.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Ground Cover 1', file: 'SM_Env_Ground_Cover_01.FBX', path: 'environment', icon: '🟫', type: 'fbx' },
-            { name: 'Ground Cover 2', file: 'SM_Env_Ground_Cover_02.FBX', path: 'environment', icon: '🟫', type: 'fbx' },
-            { name: 'Ground Cover 3', file: 'SM_Env_Ground_Cover_03.FBX', path: 'environment', icon: '🟫', type: 'fbx' },
-            { name: 'Ground Mound 1', file: 'SM_Env_Ground_Mound_Large_01.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Ground Mound 2', file: 'SM_Env_Ground_Mound_Large_02.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Ground Mound 3', file: 'SM_Env_Ground_Mound_Large_03.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Ground Mound 4', file: 'SM_Env_Ground_Mound_Large_04.FBX', path: 'environment', icon: '⛰️', type: 'fbx' },
-            { name: 'Water Plane', file: 'SM_Env_Water_Plane_01.FBX', path: 'environment', icon: '💧', type: 'fbx' }
+            { name: 'Background Hill', file: 'SM_Env_Background_Hill_01_SM_Env_Background_Hill_01.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Cloud Ring', file: 'SM_Env_CloudRing_Larger_01.glb', path: 'environment', icon: '☁️', type: 'glb' },
+            { name: 'Ground Cliff 1', file: 'SM_Env_Ground_Cliff_Large_01.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Ground Cliff 2', file: 'SM_Env_Ground_Cliff_Large_02.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Ground Cover 1', file: 'SM_Env_Ground_Cover_01.glb', path: 'environment', icon: '🟫', type: 'glb' },
+            { name: 'Ground Cover 2', file: 'SM_Env_Ground_Cover_02.glb', path: 'environment', icon: '🟫', type: 'glb' },
+            { name: 'Ground Cover 3', file: 'SM_Env_Ground_Cover_03.glb', path: 'environment', icon: '🟫', type: 'glb' },
+            { name: 'Ground Mound 1', file: 'SM_Env_Ground_Mound_Large_01.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Ground Mound 2', file: 'SM_Env_Ground_Mound_Large_02.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Ground Mound 3', file: 'SM_Env_Ground_Mound_Large_03.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Ground Mound 4', file: 'SM_Env_Ground_Mound_Large_04.glb', path: 'environment', icon: '⛰️', type: 'glb' },
+            { name: 'Water Plane', file: 'SM_Env_Water_Plane_01.glb', path: 'environment', icon: '💧', type: 'glb' }
         ];
 
         // Characters - empty for now
@@ -714,21 +1056,62 @@ class LevelEditor {
                         const hasVertexColors = child.geometry?.attributes?.color;
                         let materialConfig;
 
-                        if (isGrass || isFlower) {
+                        if (isGrass) {
+                            // Grass - use grass texture
                             materialConfig = {
-                                color: isFlower ? 0x88aa44 : 0x5d8a3e,
+                                map: this.textures.grass,
+                                color: 0x88cc88,
                                 roughness: 0.9,
                                 metalness: 0.0,
                                 transparent: true,
-                                opacity: 0.6,
+                                alphaTest: 0.5,
+                                side: THREE.DoubleSide
+                            };
+                        } else if (isFlower) {
+                            // Flowers - use flowers texture
+                            materialConfig = {
+                                map: this.textures.flowers,
+                                color: 0xffffff,
+                                roughness: 0.9,
+                                metalness: 0.0,
+                                transparent: true,
+                                alphaTest: 0.5,
+                                side: THREE.DoubleSide
+                            };
+                        } else if (isRock) {
+                            // Rocks - use rock texture
+                            materialConfig = {
+                                map: this.textures.rock,
+                                color: 0xffffff,
+                                roughness: 0.9,
+                                metalness: 0.1,
+                                side: THREE.DoubleSide
+                            };
+                        } else if (isTree) {
+                            // Trees - use branches texture
+                            materialConfig = {
+                                map: this.textures.branches,
+                                color: 0x88aa66,
+                                roughness: 0.9,
+                                metalness: 0.0,
+                                transparent: true,
+                                alphaTest: 0.5,
+                                side: THREE.DoubleSide
+                            };
+                        } else if (isEnvironment) {
+                            // Environment - use meadow texture
+                            materialConfig = {
+                                map: this.textures.meadow,
+                                color: 0xcccccc,
+                                roughness: 0.9,
+                                metalness: 0.1,
                                 side: THREE.DoubleSide
                             };
                         } else {
                             // Props - use meadow texture atlas
-                            console.log('Applying meadow texture:', this.textures.meadow);
                             materialConfig = {
                                 map: this.textures.meadow,
-                                color: 0xccaa77, // Fallback tan color if texture fails
+                                color: 0xffffff,
                                 roughness: 0.8,
                                 metalness: 0.1,
                                 side: THREE.DoubleSide
@@ -927,10 +1310,21 @@ class LevelEditor {
     onMouseDown(e) {
         this.isMouseDown = true;
         this.mouseButton = e.button;
+
+        // Start painting on left mouse button
+        if (e.button === 0 && this.paintMode) {
+            this.isPainting = true;
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const intersects = this.raycaster.intersectObject(this.terrain);
+            if (intersects.length > 0) {
+                this.paintTerrain(intersects[0].point);
+            }
+        }
     }
 
     onMouseUp(e) {
         this.isMouseDown = false;
+        this.isPainting = false;
     }
 
     onMouseMove(e) {
@@ -946,6 +1340,21 @@ class LevelEditor {
         // Terrain editing
         if (this.isMouseDown && this.mouseButton === 0 && this.terrainTool) {
             this.editTerrain();
+        }
+
+        // Terrain painting
+        if (this.paintMode) {
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const intersects = this.raycaster.intersectObject(this.terrain);
+            if (intersects.length > 0) {
+                // Update brush cursor position
+                this.updateBrushCursor(intersects[0].point);
+
+                // Paint while dragging
+                if (this.isPainting && this.mouseButton === 0) {
+                    this.paintTerrain(intersects[0].point);
+                }
+            }
         }
 
         // Update cursor position display
@@ -989,6 +1398,12 @@ class LevelEditor {
 
         // Clone the preview object
         const newObject = this.previewObject.clone();
+
+        // Check if this is a vegetation asset that needs transparency
+        const isGrass = this.selectedAsset?.path?.includes('grass') || this.selectedAsset?.file?.includes('Grass') || this.selectedAsset?.file?.includes('CropField');
+        const isFlower = this.selectedAsset?.path?.includes('flowers') || this.selectedAsset?.file?.includes('Flower') || this.selectedAsset?.file?.includes('Lillies') || this.selectedAsset?.file?.includes('Rapeseed') || this.selectedAsset?.file?.includes('Sunflower') || this.selectedAsset?.file?.includes('Wildflowers');
+        const needsTransparency = isGrass || isFlower;
+
         newObject.traverse(child => {
             if (child.isMesh) {
                 child.castShadow = true;
@@ -1000,15 +1415,19 @@ class LevelEditor {
                         child.material = child.material.map(mat => {
                             const cloned = mat.clone();
                             cloned.side = THREE.DoubleSide;
-                            cloned.transparent = false;
-                            cloned.opacity = 1.0;
+                            if (!needsTransparency) {
+                                cloned.transparent = false;
+                                cloned.opacity = 1.0;
+                            }
                             return cloned;
                         });
                     } else {
                         child.material = child.material.clone();
                         child.material.side = THREE.DoubleSide;
-                        child.material.transparent = false;
-                        child.material.opacity = 1.0;
+                        if (!needsTransparency) {
+                            child.material.transparent = false;
+                            child.material.opacity = 1.0;
+                        }
                     }
                 }
             }
@@ -1094,39 +1513,49 @@ class LevelEditor {
         const geometry = this.terrain.geometry;
         const positions = geometry.attributes.position;
 
-        for (let i = 0; i < positions.count; i++) {
-            const x = positions.getX(i);
-            const z = positions.getZ(i);
+        // PlaneGeometry is in XY plane, then rotated -90° on X to lie flat
+        // Local X = World X
+        // Local Y = -World Z (after rotation)
+        // Local Z becomes the height (World Y)
 
-            // Convert to world space
-            const worldX = x;
-            const worldZ = z;
+        for (let i = 0; i < positions.count; i++) {
+            // Get local position
+            const localX = positions.getX(i);
+            const localY = positions.getY(i);
+            const localZ = positions.getZ(i);
+
+            // Convert to world position (accounting for -90° X rotation)
+            // After rotation: world X = local X, world Y = local Z, world Z = -local Y
+            const worldX = localX;
+            const worldZ = -localY;
 
             const distance = Math.sqrt(
                 Math.pow(worldX - point.x, 2) + Math.pow(worldZ - point.z, 2)
             );
 
             if (distance < this.brushSize) {
-                const influence = (1 - distance / this.brushSize) * this.brushStrength * 0.1;
-                let y = positions.getY(i);
+                const influence = (1 - distance / this.brushSize) * this.brushStrength * 0.3;
+
+                // Height is stored in local Z
+                let height = localZ;
 
                 switch (this.terrainTool) {
                     case 'raise':
-                        y += influence;
+                        height += influence;
                         break;
                     case 'lower':
-                        y -= influence;
+                        height -= influence;
                         break;
                     case 'smooth':
-                        // Average with neighbors (simplified)
-                        y *= (1 - influence * 0.5);
+                        // Move towards 0 (simplified smoothing)
+                        height *= (1 - influence * 0.5);
                         break;
                     case 'flatten':
-                        y = y * (1 - influence) + 0 * influence;
+                        height = height * (1 - influence);
                         break;
                 }
 
-                positions.setY(i, y);
+                positions.setZ(i, height);
             }
         }
 

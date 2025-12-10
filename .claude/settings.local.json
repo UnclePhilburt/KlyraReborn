@@ -30,7 +30,11 @@
       "Bash(node -e:*)",
       "Bash(find:*)",
       "Bash(git restore:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd level editor and Synty Meadow biome assets\n\n- Add complete level editor with asset browser, placement, and scene management\n- Add 197 Synty Polygon Biomes Meadow assets:\n  - 8 buildings (GLB)\n  - 96 props (FBX) \n  - 15 trees/bushes (3 GLB + 12 FBX)\n  - 22 rocks (FBX)\n  - 29 grass (8 GLB + 21 FBX)\n  - 15 flowers (FBX)\n  - 12 environment (FBX)\n- Add meadow texture atlas and support textures\n- Add main menu UI component\n- Add copy-unreal-glbs utility script\n- Remove old character assets (will re-add later)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)",
+      "Bash(for f in PFK_*.png)",
+      "Bash(done)"
     ]
   }
 }
