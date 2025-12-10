@@ -477,6 +477,23 @@
             line-height: 1.4;
         }
 
+        /* Foliage Section */
+        .terrain-foliage-section {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border);
+        }
+
+        .foliage-btn {
+            background: #2a4a5a !important;
+            margin-bottom: 8px;
+        }
+
+        .foliage-btn:hover {
+            background: #3a6a7a !important;
+            border-color: #5a9aba !important;
+        }
+
         /* Tabs */
         .tab-container {
             display: flex;
@@ -835,6 +852,23 @@
 
                     <div class="paint-instructions">
                         <small>Click "Paint Mode" then left-click and drag on terrain to paint the selected texture.</small>
+                    </div>
+
+                    <div class="terrain-foliage-section">
+                        <label class="section-label">Auto Foliage</label>
+                        <div class="slider-row">
+                            <label>Grass Density: <span id="grass-density-val">15%</span></label>
+                            <input type="range" id="grass-density" min="5" max="50" step="5" value="15">
+                        </div>
+                        <button class="terrain-tool-btn foliage-btn" id="btn-auto-grass" title="Scatter grass on grass-textured areas">
+                            Auto-Populate Grass
+                        </button>
+                        <button class="terrain-tool-btn foliage-btn" id="btn-clear-grass" title="Remove auto-generated grass">
+                            Clear Auto Grass
+                        </button>
+                        <div class="paint-instructions">
+                            <small>Automatically places grass props on areas painted with grass texture.</small>
+                        </div>
                     </div>
                 </div>
             </div>

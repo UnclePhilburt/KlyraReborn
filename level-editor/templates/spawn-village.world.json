@@ -1,0 +1,223 @@
+{
+  "version": "2.0",
+  "name": "Village Spawn Area",
+  "currentChunk": { "x": 0, "z": 0 },
+  "chunks": {
+    "0,0": {
+      "terrain": {
+        "heights": []
+      },
+      "splatmap": null,
+      "objects": [
+        {
+          "name": "Tavern (Spawn)",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_Tavern_01_Optimized.glb",
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "House 1",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_House_01_A_Optimized.glb",
+          "position": { "x": -15, "y": 0, "z": -12 },
+          "rotation": { "x": 0, "y": 45, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "House 2",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_House_02_A_Optimized.glb",
+          "position": { "x": 15, "y": 0, "z": -12 },
+          "rotation": { "x": 0, "y": -45, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "House 3",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_House_03_Optimized.glb",
+          "position": { "x": -18, "y": 0, "z": 8 },
+          "rotation": { "x": 0, "y": 90, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "House 4",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_House_04_Optimized.glb",
+          "position": { "x": 18, "y": 0, "z": 8 },
+          "rotation": { "x": 0, "y": -90, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Blacksmith",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_Blacksmith_01_Optimized.glb",
+          "position": { "x": -20, "y": 0, "z": -5 },
+          "rotation": { "x": 0, "y": 70, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Church",
+          "type": "buildings",
+          "file": "SM_Bld_Preset_Church_01_A_Optimized.glb",
+          "position": { "x": 0, "y": 0, "z": -25 },
+          "rotation": { "x": 0, "y": 180, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Warpgate",
+          "type": "buildings",
+          "file": "SM_Bld_Warpgate_01.glb",
+          "position": { "x": 0, "y": 0, "z": 30 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Central Fireplace",
+          "type": "props",
+          "file": "SM_Prop_Camp_Fireplace_01.FBX",
+          "position": { "x": 0, "y": 0, "z": 12 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Barrel 1",
+          "type": "props",
+          "file": "SM_Prop_Barrel_Group_01.FBX",
+          "position": { "x": -5, "y": 0, "z": 3 },
+          "rotation": { "x": 0, "y": 30, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Barrel 2",
+          "type": "props",
+          "file": "SM_Prop_Barrel_Group_01.FBX",
+          "position": { "x": 6, "y": 0, "z": 2 },
+          "rotation": { "x": 0, "y": -20, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Crate 1",
+          "type": "props",
+          "file": "SM_Prop_Camp_Crate_01.FBX",
+          "position": { "x": -8, "y": 0, "z": 6 },
+          "rotation": { "x": 0, "y": 15, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree NW 1",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_01.glb",
+          "position": { "x": -30, "y": 0, "z": -20 },
+          "rotation": { "x": 0, "y": 45, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree NW 2",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_02.glb",
+          "position": { "x": -35, "y": 0, "z": -15 },
+          "rotation": { "x": 0, "y": 120, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree NE 1",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_01.glb",
+          "position": { "x": 30, "y": 0, "z": -20 },
+          "rotation": { "x": 0, "y": -30, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree NE 2",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_02.glb",
+          "position": { "x": 35, "y": 0, "z": -15 },
+          "rotation": { "x": 0, "y": 200, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree SW 1",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_01.glb",
+          "position": { "x": -32, "y": 0, "z": 18 },
+          "rotation": { "x": 0, "y": 80, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree SW 2",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_02.glb",
+          "position": { "x": -28, "y": 0, "z": 25 },
+          "rotation": { "x": 0, "y": 150, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree SE 1",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_01.glb",
+          "position": { "x": 32, "y": 0, "z": 18 },
+          "rotation": { "x": 0, "y": -80, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Tree SE 2",
+          "type": "trees",
+          "file": "SM_Env_Tree_Birch_02.glb",
+          "position": { "x": 28, "y": 0, "z": 25 },
+          "rotation": { "x": 0, "y": -150, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Bush 1",
+          "type": "trees",
+          "file": "SM_Env_Bush_01.glb",
+          "position": { "x": -25, "y": 0, "z": -8 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Bush 2",
+          "type": "trees",
+          "file": "SM_Env_Bush_02.glb",
+          "position": { "x": 25, "y": 0, "z": -8 },
+          "rotation": { "x": 0, "y": 45, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Bush 3",
+          "type": "trees",
+          "file": "SM_Env_Bush_03.glb",
+          "position": { "x": -12, "y": 0, "z": 20 },
+          "rotation": { "x": 0, "y": 90, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Bush 4",
+          "type": "trees",
+          "file": "SM_Env_Bush_01.glb",
+          "position": { "x": 12, "y": 0, "z": 20 },
+          "rotation": { "x": 0, "y": -90, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Horse Hitch",
+          "type": "props",
+          "file": "SM_Prop_HorseHitch_01.FBX",
+          "position": { "x": 8, "y": 0, "z": -5 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        },
+        {
+          "name": "Player Spawn",
+          "type": "spawn",
+          "spawnType": "player",
+          "position": { "x": 0, "y": 0, "z": 15 },
+          "rotation": { "x": 0, "y": 180, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        }
+      ]
+    }
+  }
+}
