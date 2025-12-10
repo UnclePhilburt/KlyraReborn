@@ -13,7 +13,13 @@
       "Bash(npm run dev:server:*)",
       "Bash(npm run dev:client:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Fantasy Roguelite 3D Game\n\n- Multiplayer game server with WebSocket support\n- Three.js 3D client with Vite\n- Character animation system with Unreal GLB animations\n- Polygon Fantasy Kingdom character models\n- Third-person camera controls\n- Movement system with walk/run/sprint\n- Procedural terrain generation\n- Network synchronization\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

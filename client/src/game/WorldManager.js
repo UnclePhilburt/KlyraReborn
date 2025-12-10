@@ -19,7 +19,7 @@ export class WorldManager {
         // Add some simple vertex displacement for terrain variation
         const vertices = groundGeometry.attributes.position.array;
         for (let i = 0; i < vertices.length; i += 3) {
-            vertices[i + 2] = Math.random() * 0.5; // Random height variation
+            vertices[i + 2] = Math.random() * 2; // Random height variation (increased for testing)
         }
         groundGeometry.attributes.position.needsUpdate = true;
         groundGeometry.computeVertexNormals();
@@ -40,6 +40,28 @@ export class WorldManager {
         gridHelper.material.opacity = 0.1;
         gridHelper.material.transparent = true;
         this.scene.add(gridHelper);
+    }
+
+    /**
+     * Get the terrain height at a given world position using raycasting
+     */
+    getTerrainHeight(x, z) {
+        if (!this.terrain) return 0;
+
+        // Create a raycaster pointing down from high above the position
+        const raycaster = new THREE.Raycaster();
+        const origin = new THREE.Vector3(x, 100, z);
+        const direction = new THREE.Vector3(0, -1, 0);
+        raycaster.set(origin, direction);
+
+        // Check intersection with terrain
+        const intersects = raycaster.intersectObject(this.terrain);
+
+        if (intersects.length > 0) {
+            return intersects[0].point.y;
+        }
+
+        return 0; // Default ground level
     }
 
     createTestEnvironment() {

@@ -3,10 +3,11 @@ import { AssetLoader } from '../loaders/AssetLoader.js';
 import { AnimationLoader } from '../loaders/AnimationLoader.js';
 
 export class PlayerController {
-    constructor(scene, camera, assetLoader) {
+    constructor(scene, camera, assetLoader, worldManager = null) {
         this.scene = scene;
         this.camera = camera;
         this.assetLoader = assetLoader;
+        this.worldManager = worldManager;
         this.animationLoader = new AnimationLoader();
         this.mesh = null;
         this.characterModel = null;
@@ -15,6 +16,7 @@ export class PlayerController {
         this.currentAnimation = null;
         this.velocity = new THREE.Vector3();
         this.direction = new THREE.Vector3();
+        this.targetRotation = 0; // Target rotation for smooth turning
 
         // Movement settings
         this.moveSpeed = 10;
@@ -24,6 +26,8 @@ export class PlayerController {
 
         // Camera settings
         this.cameraDistance = 10;
+        this.minCameraDistance = 3;
+        this.maxCameraDistance = 20;
         this.cameraHeight = 5;
         this.cameraAngle = 0;
         this.cameraPitch = 0.3;
@@ -40,7 +44,7 @@ export class PlayerController {
     async init(characterName = 'polygonesyntycharacter') {
         // Create the main mesh container first
         this.mesh = new THREE.Group();
-        this.mesh.position.set(0, 1, 0);
+        this.mesh.position.set(0, 0, 0); // Start at ground level
         this.scene.add(this.mesh);
 
         try {
@@ -241,6 +245,14 @@ export class PlayerController {
             this.isPointerLocked = document.pointerLockElement === document.body;
             console.log('🔒 Pointer lock:', this.isPointerLocked ? 'ENABLED' : 'DISABLED');
         });
+
+        // Mouse wheel for camera zoom
+        document.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.5;
+            this.cameraDistance += e.deltaY * 0.01 * zoomSpeed;
+            this.cameraDistance = Math.max(this.minCameraDistance, Math.min(this.maxCameraDistance, this.cameraDistance));
+        }, { passive: false });
     }
 
     update(delta) {
@@ -271,10 +283,23 @@ export class PlayerController {
 
         // Rotate character to face movement direction when moving
         if (moveDirection.length() > 0) {
-            const targetAngle = Math.atan2(moveDirection.x, moveDirection.z);
-            this.mesh.rotation.y = targetAngle;
+            this.targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
         }
         // When not moving, keep the last rotation (don't snap to camera)
+
+        // Smoothly interpolate to target rotation
+        const rotationSpeed = 10; // Higher = faster rotation
+        let currentRotation = this.mesh.rotation.y;
+
+        // Calculate shortest rotation path
+        let rotationDiff = this.targetRotation - currentRotation;
+
+        // Normalize to -PI to PI range
+        while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+        while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+
+        // Smoothly interpolate
+        this.mesh.rotation.y += rotationDiff * Math.min(rotationSpeed * delta, 1);
 
         // Apply movement with sprint modifier
         const isSprinting = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
@@ -297,11 +322,19 @@ export class PlayerController {
         this.mesh.position.y += this.velocity.y * delta;
         this.mesh.position.z += this.velocity.z * delta;
 
-        // Simple ground collision (y = 0)
-        if (this.mesh.position.y <= 1) {
-            this.mesh.position.y = 1;
+        // Terrain collision - get height at player position
+        let groundHeight = 0;
+        if (this.worldManager) {
+            groundHeight = this.worldManager.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+        }
+
+        // Check if character is on or below ground
+        if (this.mesh.position.y <= groundHeight) {
+            this.mesh.position.y = groundHeight;
             this.velocity.y = 0;
             this.isGrounded = true;
+        } else {
+            this.isGrounded = false;
         }
 
         // Update animations based on movement
@@ -365,7 +398,7 @@ export class PlayerController {
         );
 
         this.camera.position.copy(this.mesh.position).add(cameraOffset);
-        this.camera.lookAt(this.mesh.position.x, this.mesh.position.y + 1, this.mesh.position.z);
+        this.camera.lookAt(this.mesh.position.x, this.mesh.position.y + 2, this.mesh.position.z);
     }
 
     getPosition() {
@@ -383,4 +416,5 @@ export class PlayerController {
             z: this.mesh.rotation.z
         } : { x: 0, y: 0, z: 0 };
     }
+
 }
