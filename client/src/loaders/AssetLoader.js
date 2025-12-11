@@ -12,6 +12,130 @@ export class AssetLoader {
     }
 
     /**
+     * Normalize bone names to match the Synty/Animation skeleton
+     * Converts lowercase polygon bones to uppercase Unreal bones
+     */
+    normalizeBoneNames(model) {
+        const boneMap = {
+            // Root and Hips
+            'root': 'Root',
+            'pelvis': 'Hips',
+
+            // Spine
+            'spine_01': 'Spine_01',
+            'spine_02': 'Spine_02',
+            'spine_03': 'Spine_03',
+
+            // Neck and Head
+            'neck_01': 'Neck',
+            'head': 'Head',
+            'eyes': 'Eyes',
+            'eyebrows': 'Eyebrows',
+
+            // Left Arm
+            'clavicle_l': 'Clavicle_L',
+            'upperarm_l': 'Shoulder_L',
+            'lowerarm_l': 'Elbow_L',
+            'hand_l': 'Hand_L',
+
+            // Right Arm
+            'clavicle_r': 'Clavicle_R',
+            'upperarm_r': 'Shoulder_R',
+            'lowerarm_r': 'Elbow_R',
+            'hand_r': 'Hand_R',
+
+            // Left Leg
+            'thigh_l': 'UpperLeg_L',
+            'calf_l': 'LowerLeg_L',
+            'foot_l': 'Ankle_L',
+            'ball_l': 'Ball_L',
+            'toes_l': 'Toes_L',
+
+            // Right Leg
+            'thigh_r': 'UpperLeg_R',
+            'calf_r': 'LowerLeg_R',
+            'foot_r': 'Ankle_R',
+            'ball_r': 'Ball_R',
+            'toes_r': 'Toes_R',
+
+            // Left Hand Fingers
+            'thumb_01_l': 'Thumb_01',
+            'thumb_02_l': 'Thumb_02',
+            'thumb_03_l': 'Thumb_03',
+            'index_01_l': 'IndexFinger_01',
+            'index_02_l': 'IndexFinger_02',
+            'index_03_l': 'IndexFinger_03',
+            'middle_01_l': 'Finger_01',
+            'middle_02_l': 'Finger_02',
+            'middle_03_l': 'Finger_03',
+            'ring_01_l': 'ring_01_l',
+            'ring_02_l': 'ring_02_l',
+            'ring_03_l': 'ring_03_l',
+            'pinky_01_l': 'pinky_01_l',
+            'pinky_02_l': 'pinky_02_l',
+            'pinky_03_l': 'pinky_03_l',
+
+            // Right Hand Fingers
+            'thumb_01_r': 'Thumb_01_1',
+            'thumb_02_r': 'Thumb_02_1',
+            'thumb_03_r': 'Thumb_03_1',
+            'index_01_r': 'IndexFinger_01_1',
+            'index_02_r': 'IndexFinger_02_1',
+            'index_03_r': 'IndexFinger_03_1',
+            'middle_01_r': 'Finger_01_1',
+            'middle_02_r': 'Finger_02_1',
+            'middle_03_r': 'Finger_03_1',
+            'ring_01_r': 'ring_01_r',
+            'ring_02_r': 'ring_02_r',
+            'ring_03_r': 'ring_03_r',
+            'pinky_01_r': 'pinky_01_r',
+            'pinky_02_r': 'pinky_02_r',
+            'pinky_03_r': 'pinky_03_r',
+
+            // Ignore IK bones
+            'ik_foot_root': null,
+            'ik_foot_l': null,
+            'ik_foot_r': null,
+            'ik_hand_root': null,
+            'ik_hand_gun': null,
+            'ik_hand_l': null,
+            'ik_hand_r': null
+        };
+
+        let renamed = 0;
+        let ignored = 0;
+        const bonesToReset = [];
+
+        model.traverse((child) => {
+            if (child.isBone && boneMap[child.name] !== undefined) {
+                const newName = boneMap[child.name];
+                if (newName === null) {
+                    // Ignore this bone (IK bones, etc.)
+                    ignored++;
+                } else {
+                    console.log(`🔄 Renaming bone: ${child.name} → ${newName}`);
+                    child.name = newName;
+                    bonesToReset.push(child);
+                    renamed++;
+                }
+            }
+        });
+
+        // DON'T reset bind pose - causes T-pose issues
+        // The character model bind pose should be left as-is from the GLB file
+        if (bonesToReset.length > 0) {
+            console.log(`✅ Bone renaming complete - NOT resetting bind pose (prevents T-pose)`);
+        }
+
+        if (renamed > 0) {
+            console.log(`✅ Renamed ${renamed} bones to match animation skeleton`);
+        }
+        if (ignored > 0) {
+            console.log(`⏭️ Ignored ${ignored} IK/helper bones`);
+        }
+    }
+
+    /**
      * Load a texture atlas
      */
     async loadTexture(path) {
@@ -147,7 +271,10 @@ export class AssetLoader {
         const fbxPath = `/assets/characters/${characterName}.fbx`;
 
         // Check if it's a known GLB character (like polygonesyntycharacter)
-        const isGLB = characterName.toLowerCase().includes('polygon') || characterName.toLowerCase().includes('synty');
+        // Check if it's a GLB character (Polygon Fantasy Kingdom characters start with SK_Chr_)
+        const isGLB = characterName.toLowerCase().includes('polygon') ||
+                      characterName.toLowerCase().includes('synty') ||
+                      characterName.toLowerCase().startsWith('sk_chr_');
 
         if (isGLB) {
             return this.loadCharacterGLB(characterName, glbPath, texturePath);
@@ -194,6 +321,9 @@ export class AssetLoader {
                         }
                     });
                     console.log('🦴 Character bones:', boneNames.join(', '));
+
+                    // DON'T normalize bone names - causes bind pose issues
+                    // this.normalizeBoneNames(model);
 
                     resolve(model);
                 },

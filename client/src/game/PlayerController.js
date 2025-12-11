@@ -31,12 +31,29 @@ export class PlayerController {
         this.cameraHeight = 5;
         this.cameraAngle = 0;
         this.cameraPitch = 0.3;
+        this.isFirstPerson = false;
+        this.firstPersonHeight = 1.6; // Eye height in first person
+
+        // Camera dead zone for smoother feel
+        this.cameraTargetX = 0; // Target camera angle
+        this.cameraTargetY = 0; // Target camera pitch
+        this.cameraDeadZone = 0.15; // Dead zone radius for mouse movement
+
+        // Character position dead zone
+        this.cameraFollowDeadZone = 2.0; // Distance character can move before camera follows
+        this.lastCameraFollowPosition = new THREE.Vector3();
 
         // Input state
         this.keys = {};
         this.mouseX = 0;
         this.mouseY = 0;
         this.isPointerLocked = false;
+
+        // Combat state
+        this.isAttacking = false;
+        this.comboStep = 0; // Track which combo step we're on (0, 1, 2)
+        this.comboResetTimer = null;
+        this.queuedAttack = null; // Queue next attack for smooth combos
 
         this.setupControls();
     }
@@ -73,6 +90,15 @@ export class PlayerController {
                     console.log('   - Skeleton:', child.skeleton);
                     console.log('   - Visible:', child.visible);
                     console.log('   - MatrixWorldNeedsUpdate:', child.matrixWorldNeedsUpdate);
+
+                    // Enable shadows on player character
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+                // Also enable shadows on all other mesh children
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
                 }
             });
 
@@ -130,12 +156,16 @@ export class PlayerController {
 
             // Define all animations to load
             const animationsToLoad = [
-                { name: 'idle', path: '/assets/glbanimations/idle.glb' },
+                { name: 'idle', path: '/assets/glbanimations/A_Idle_Standing_Masc.glb' },
                 { name: 'walk', path: '/assets/glbanimations/walk.glb' },
                 { name: 'run_forward', path: '/assets/glbanimations/run_forward.glb' },
                 { name: 'run_backward', path: '/assets/glbanimations/run_backward.glb' },
                 { name: 'run_left', path: '/assets/glbanimations/run_left.glb' },
-                { name: 'run_right', path: '/assets/glbanimations/run_right.glb' }
+                { name: 'run_right', path: '/assets/glbanimations/run_right.glb' },
+                { name: 'attack_stab', path: '/assets/glbanimations/A_Attack_HeavyStab01_ReturnToIdle_Sword.glb' },
+                { name: 'attack_combo_a', path: '/assets/glbanimations/A_Attack_HeavyCombo01A_Sword.glb' },
+                { name: 'attack_combo_b', path: '/assets/glbanimations/A_Attack_HeavyCombo01B_Sword.glb' },
+                { name: 'attack_combo_c', path: '/assets/glbanimations/A_Attack_HeavyCombo01C_Sword.glb' }
             ];
 
             // Load all animations
@@ -159,8 +189,9 @@ export class PlayerController {
 
             // Get all loaded animation clips
             const loadedClips = [];
-            if (this.animations.idle) loadedClips.push(this.animations.idle.getClip());
-            if (this.animations.walk) loadedClips.push(this.animations.walk.getClip());
+            for (const key in this.animations) {
+                loadedClips.push(this.animations[key].getClip());
+            }
 
             loadedClips.forEach((clip) => {
                 const originalTrackCount = clip.tracks.length;
@@ -195,41 +226,177 @@ export class PlayerController {
         }
     }
 
-    playAnimation(name) {
+    playAnimation(name, fadeTime = 0.2) {
         if (!this.animations[name]) {
-            console.warn(`Animation "${name}" not found`);
+            console.warn(`❌ Animation "${name}" not found`);
+            console.log('Available animations:', Object.keys(this.animations));
             return;
         }
 
         // Stop current animation
         if (this.currentAnimation) {
-            this.currentAnimation.fadeOut(0.2);
+            console.log(`⏹️ Stopping current animation: ${this.currentAnimation.getClip().name}`);
+            this.currentAnimation.fadeOut(fadeTime);
         }
 
         // Play new animation
         const action = this.animations[name];
-        action.reset().fadeIn(0.2).play();
+        action.reset().fadeIn(fadeTime).play();
         this.currentAnimation = action;
 
+        const clip = action.getClip();
         console.log(`🎬 Playing animation: ${name}`);
+        console.log(`   Duration: ${clip.duration.toFixed(2)}s`);
+        console.log(`   Tracks: ${clip.tracks.length}`);
+        console.log(`   Weight: ${action.getEffectiveWeight()}`);
+        console.log(`   Enabled: ${action.enabled}`);
+    }
+
+    performAttack(attackType = 'attack_stab') {
+        if (this.isAttacking) {
+            console.log('⚠️ Already attacking, ignoring click');
+            return;
+        }
+
+        console.log(`⚔️ Attacking with ${attackType}!`);
+        this.isAttacking = true;
+
+        // Play attack animation (don't loop)
+        const attackAction = this.animations[attackType];
+        if (!attackAction) {
+            console.error(`❌ Attack animation "${attackType}" not found!`);
+            this.isAttacking = false;
+            return;
+        }
+
+        // Fade out current animation smoothly
+        if (this.currentAnimation) {
+            this.currentAnimation.fadeOut(0.1);
+        }
+
+        attackAction.reset();
+        attackAction.setLoop(THREE.LoopOnce, 1);
+        attackAction.clampWhenFinished = true; // Hold last frame to prevent T-pose
+        attackAction.timeScale = 1.0; // Normal speed (1.0 = 100%)
+        attackAction.fadeIn(0.1); // Smooth fade in
+        attackAction.play();
+        this.currentAnimation = attackAction;
+
+        // Get animation duration and set timeout
+        const duration = attackAction.getClip().duration;
+        const trackCount = attackAction.getClip().tracks.length;
+        console.log(`⏱️ Attack duration: ${duration.toFixed(2)}s, ${trackCount} tracks`);
+
+        // Wait for full animation to complete, then check for queued attack or return to idle
+        setTimeout(() => {
+            console.log('⏰ Attack animation complete');
+            this.isAttacking = false;
+
+            // Check if there's a queued attack (for smooth combos)
+            if (this.queuedAttack) {
+                console.log('⚡ Playing queued attack:', this.queuedAttack);
+                const nextAttack = this.queuedAttack;
+                this.queuedAttack = null;
+                this.performAttack(nextAttack);
+            } else {
+                // No queued attack, return to idle
+                attackAction.fadeOut(0.2);
+                this.playAnimation('idle', 0.2);
+            }
+        }, duration * 1000); // Wait exact duration
     }
 
     setupControls() {
         // Keyboard controls
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
+
+            // Toggle first person on P key
+            if (e.code === 'KeyP') {
+                this.isFirstPerson = !this.isFirstPerson;
+                console.log(this.isFirstPerson ? '👤 First person mode' : '🎥 Third person mode');
+            }
+
+            // Attack with left mouse button (handled separately)
+            // Removed spacebar attack since it conflicts with jump
         });
 
         document.addEventListener('keyup', (e) => {
             this.keys[e.code] = false;
         });
 
-        // Mouse controls for camera
+        // Mouse controls for camera with dead zone
         document.addEventListener('mousemove', (e) => {
             if (this.isPointerLocked) {
-                this.mouseX -= e.movementX * 0.002; // Inverted for correct camera rotation
-                this.mouseY += e.movementY * 0.002;
-                this.mouseY = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.mouseY));
+                // Update target camera position
+                this.cameraTargetX -= e.movementX * 0.002;
+                this.cameraTargetY -= e.movementY * 0.002;
+                this.cameraTargetY = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.cameraTargetY));
+
+                // Calculate distance from center
+                const distanceFromCenter = Math.sqrt(
+                    Math.pow(this.cameraTargetX - this.mouseX, 2) +
+                    Math.pow(this.cameraTargetY - this.mouseY, 2)
+                );
+
+                // Only move camera if outside dead zone
+                if (distanceFromCenter > this.cameraDeadZone) {
+                    // Smoothly move towards target
+                    const smoothFactor = 0.15;
+                    this.mouseX += (this.cameraTargetX - this.mouseX) * smoothFactor;
+                    this.mouseY += (this.cameraTargetY - this.mouseY) * smoothFactor;
+                }
+            }
+        });
+
+        // Mouse button for attack
+        document.addEventListener('mousedown', (e) => {
+            if (this.isPointerLocked) {
+                if (e.button === 0) { // Left click - stab attack
+                    if (!this.isAttacking && this.animations.attack_stab) {
+                        this.performAttack('attack_stab');
+                        this.comboStep = 0; // Reset combo
+                    }
+                } else if (e.button === 2) { // Right click - combo attack sequence
+                    e.preventDefault();
+                    const comboAnims = ['attack_combo_a', 'attack_combo_b', 'attack_combo_c'];
+
+                    if (!this.isAttacking) {
+                        // Not attacking, start immediately
+                        console.log(`🎯 Starting combo step ${this.comboStep}: ${comboAnims[this.comboStep]}`);
+                        if (this.animations[comboAnims[this.comboStep]]) {
+                            this.performAttack(comboAnims[this.comboStep]);
+                            this.comboStep = (this.comboStep + 1) % 3; // Cycle 0 -> 1 -> 2 -> 0
+
+                            // Reset combo after 5 seconds of no attacks
+                            if (this.comboResetTimer) clearTimeout(this.comboResetTimer);
+                            this.comboResetTimer = setTimeout(() => {
+                                this.comboStep = 0;
+                                console.log('🔄 Combo reset to step 0');
+                            }, 5000);
+                        }
+                    } else {
+                        // Currently attacking, queue the next combo attack
+                        this.queuedAttack = comboAnims[this.comboStep];
+                        console.log(`📋 Queued next combo attack: ${this.queuedAttack}`);
+                        this.comboStep = (this.comboStep + 1) % 3; // Advance combo step
+
+                        // Reset combo timer
+                        if (this.comboResetTimer) clearTimeout(this.comboResetTimer);
+                        this.comboResetTimer = setTimeout(() => {
+                            this.comboStep = 0;
+                            this.queuedAttack = null;
+                            console.log('🔄 Combo reset to step 0');
+                        }, 5000);
+                    }
+                }
+            }
+        });
+
+        // Prevent right-click context menu
+        document.addEventListener('contextmenu', (e) => {
+            if (this.isPointerLocked) {
+                e.preventDefault();
             }
         });
 
@@ -301,12 +468,18 @@ export class PlayerController {
         // Smoothly interpolate
         this.mesh.rotation.y += rotationDiff * Math.min(rotationSpeed * delta, 1);
 
-        // Apply movement with sprint modifier
+        // Apply movement with sprint modifier (but not while attacking)
         const isSprinting = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
         const currentSpeed = isSprinting ? this.moveSpeed * 2 : this.moveSpeed;
 
-        this.velocity.x = moveDirection.x * currentSpeed;
-        this.velocity.z = moveDirection.z * currentSpeed;
+        // Stop movement during attacks
+        if (this.isAttacking) {
+            this.velocity.x = 0;
+            this.velocity.z = 0;
+        } else {
+            this.velocity.x = moveDirection.x * currentSpeed;
+            this.velocity.z = moveDirection.z * currentSpeed;
+        }
 
         // Apply gravity
         this.velocity.y += this.gravity * delta;
@@ -337,10 +510,18 @@ export class PlayerController {
             this.isGrounded = false;
         }
 
+        // Update camera position first (so it works during attacks)
+        this.updateCamera();
+
         // Update animations based on movement
         if (this.mixer) {
             // Update animation mixer
             this.mixer.update(delta);
+
+            // Don't change animations while attacking
+            if (this.isAttacking) {
+                return; // Skip animation logic during attacks
+            }
 
             // Determine which animation to play based on movement
             const isMoving = this.direction.length() > 0.1;
@@ -382,23 +563,102 @@ export class PlayerController {
                 this.playAnimation('idle');
             }
         }
-
-        // Update camera position
-        this.updateCamera();
     }
 
     updateCamera() {
         if (!this.mesh) return;
 
-        // Third-person camera
-        const cameraOffset = new THREE.Vector3(
-            Math.sin(this.mouseX) * this.cameraDistance,
-            this.cameraHeight + this.mouseY * 5,
-            Math.cos(this.mouseX) * this.cameraDistance
-        );
+        if (this.isFirstPerson && !this.isAttacking) {
+            // First-person camera (at eye level) - only when not attacking
+            const eyePosition = new THREE.Vector3(
+                this.mesh.position.x,
+                this.mesh.position.y + this.firstPersonHeight,
+                this.mesh.position.z
+            );
 
-        this.camera.position.copy(this.mesh.position).add(cameraOffset);
-        this.camera.lookAt(this.mesh.position.x, this.mesh.position.y + 2, this.mesh.position.z);
+            // Position camera at eye level
+            this.camera.position.copy(eyePosition);
+
+            // Look direction based on mouse movement (flipped to face forward)
+            const lookDirection = new THREE.Vector3(
+                -Math.sin(this.mouseX),
+                this.mouseY,
+                -Math.cos(this.mouseX)
+            );
+
+            const lookAt = eyePosition.clone().add(lookDirection);
+            this.camera.lookAt(lookAt);
+
+            // Hide character model in first person
+            if (this.characterModel) {
+                this.characterModel.visible = false;
+            }
+        } else if (this.isFirstPerson && this.isAttacking) {
+            // Over-the-shoulder view when attacking in first person
+            const shoulderDistance = 3;
+            const shoulderHeight = 1.4;
+
+            const cameraOffset = new THREE.Vector3(
+                Math.sin(this.mouseX) * shoulderDistance,
+                shoulderHeight + this.mouseY * 3,
+                Math.cos(this.mouseX) * shoulderDistance
+            );
+
+            this.camera.position.copy(this.mesh.position).add(cameraOffset);
+            this.camera.lookAt(this.mesh.position.x, this.mesh.position.y + 1.5, this.mesh.position.z);
+
+            // Show character model when attacking in first person
+            if (this.characterModel) {
+                this.characterModel.visible = true;
+            }
+        } else {
+            // Third-person over-the-shoulder camera (right shoulder)
+            const shoulderOffset = 0.8; // Offset to the right
+            const backDistance = this.cameraDistance * 0.7; // Distance behind character
+            const heightOffset = 1.8; // Height above character
+
+            // Initialize last camera follow position if needed
+            if (this.lastCameraFollowPosition.length() === 0) {
+                this.lastCameraFollowPosition.copy(this.mesh.position);
+            }
+
+            // Calculate distance character has moved from last camera follow position
+            const distanceMoved = this.mesh.position.distanceTo(this.lastCameraFollowPosition);
+
+            // Target position to follow (either character or last follow position)
+            let followTarget = this.lastCameraFollowPosition.clone();
+
+            // If character moved outside dead zone, update follow position
+            if (distanceMoved > this.cameraFollowDeadZone) {
+                // Smoothly move the follow target towards character
+                followTarget.lerp(this.mesh.position, 0.1);
+                this.lastCameraFollowPosition.copy(followTarget);
+            }
+
+            // Calculate camera position relative to follow target
+            const targetCameraPos = new THREE.Vector3(
+                followTarget.x + Math.sin(this.mouseX) * backDistance + Math.cos(this.mouseX) * shoulderOffset,
+                followTarget.y + heightOffset + this.mouseY * 3,
+                followTarget.z + Math.cos(this.mouseX) * backDistance - Math.sin(this.mouseX) * shoulderOffset
+            );
+
+            // Smoothly interpolate camera position for smooth following
+            const lerpFactor = 0.1; // Lower = smoother but slower, higher = faster but jerkier
+            this.camera.position.lerp(targetCameraPos, lerpFactor);
+
+            // Look at the actual character position (not follow target) with slight offset
+            const lookAtPoint = new THREE.Vector3(
+                this.mesh.position.x - Math.sin(this.mouseX) * 2 + Math.cos(this.mouseX) * 0.3,
+                this.mesh.position.y + 1.5,
+                this.mesh.position.z - Math.cos(this.mouseX) * 2 - Math.sin(this.mouseX) * 0.3
+            );
+            this.camera.lookAt(lookAtPoint);
+
+            // Show character model in third person
+            if (this.characterModel) {
+                this.characterModel.visible = true;
+            }
+        }
     }
 
     getPosition() {

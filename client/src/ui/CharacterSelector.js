@@ -4,10 +4,7 @@ export class CharacterSelector {
         this.selectedCharacter = null;
 
         this.characters = [
-            { name: 'SK_Chr_Soldier_Male_01', display: 'Knight' },
-            { name: 'SK_Chr_Mage_01', display: 'Mage' },
-            { name: 'SK_Chr_King_01', display: 'King' },
-            { name: 'SK_Chr_Peasant_Male_01', display: 'Peasant' }
+            { name: 'polygonesyntycharacter', display: 'Synty' }
         ];
 
         this.createUI();
@@ -125,10 +122,7 @@ export class CharacterSelector {
 
     getCharacterIcon(displayName) {
         const icons = {
-            'Knight': '⚔️',
-            'Mage': '🧙',
-            'King': '👑',
-            'Peasant': '🧑'
+            'Synty': '⚔️'
         };
         return icons[displayName] || '🎮';
     }
