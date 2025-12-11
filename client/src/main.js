@@ -6,6 +6,7 @@ import { UIManager } from './ui/UIManager.js';
 import { AssetLoader } from './loaders/AssetLoader.js';
 import { CharacterSelector } from './ui/CharacterSelector.js';
 import { MainMenu } from './ui/MainMenu.js';
+import { GoblinSpawner } from './game/GoblinSpawner.js';
 
 class Game {
     constructor() {
@@ -23,6 +24,7 @@ class Game {
         this.selectedCharacter = null;
         this.players = new Map();
         this.isLoaded = false;
+        this.goblinSpawner = null;
 
         this.showMainMenu();
     }
@@ -63,10 +65,21 @@ class Game {
         this.uiManager.updateLoadingProgress(60, 'Creating player...');
 
         // Initialize player with asset loader and world manager for collision
-        // Always use polygonesyntycharacter for the skeleton (has all the bones)
-        // TODO: Later we can swap the mesh to selectedCharacter while keeping the skeleton
         this.playerController = new PlayerController(this.scene, this.camera, this.assetLoader, this.worldManager);
-        await this.playerController.init('polygonesyntycharacter');
+        await this.playerController.init(this.selectedCharacter || 'polygonesyntycharacter');
+
+        this.uiManager.updateLoadingProgress(75, 'Spawning goblins...');
+
+        // Initialize goblin spawner
+        this.goblinSpawner = new GoblinSpawner(this.scene, this.worldManager);
+        await this.goblinSpawner.init();
+        this.goblinSpawner.spawnGoblins(5, 0, 0, 10); // Spawn 5 wandering goblins closer to spawn
+
+        // Connect goblin spawner to player controller for targeting
+        this.playerController.setGoblinSpawner(this.goblinSpawner);
+
+        // Connect player controller to goblin spawner for collision
+        this.goblinSpawner.setPlayerController(this.playerController);
 
         this.uiManager.updateLoadingProgress(80, 'Final setup...');
 
@@ -85,13 +98,20 @@ class Game {
     setupRenderer() {
         this.renderer = new THREE.WebGLRenderer({
             canvas: document.getElementById('game-canvas'),
-            antialias: true
+            antialias: true,
+            powerPreference: 'high-performance', // Request high-performance GPU
+            stencil: false, // Disable stencil buffer if not needed
+            depth: true
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.shadowMap.enabled = true;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
+        this.renderer.shadowMap.enabled = true; // Re-enabled now that we use GPU instancing
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        // Performance optimizations
+        this.renderer.sortObjects = true; // Enable object sorting for better batching
+        this.renderer.info.autoReset = true;
     }
 
     setupScene() {
@@ -117,16 +137,17 @@ class Game {
 
         // Directional light (sun)
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(50, 50, 50);
+        dirLight.position.set(100, 100, 100);
         dirLight.castShadow = true;
-        dirLight.shadow.camera.left = -50;
-        dirLight.shadow.camera.right = 50;
-        dirLight.shadow.camera.top = 50;
-        dirLight.shadow.camera.bottom = -50;
+        dirLight.shadow.camera.left = -100;
+        dirLight.shadow.camera.right = 100;
+        dirLight.shadow.camera.top = 100;
+        dirLight.shadow.camera.bottom = -100;
         dirLight.shadow.camera.near = 0.1;
-        dirLight.shadow.camera.far = 200;
-        dirLight.shadow.mapSize.width = 2048;
-        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.far = 300;
+        dirLight.shadow.mapSize.width = 1024; // Reduced from 2048 for stability
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.bias = -0.0005;
         this.scene.add(dirLight);
 
         // Hemisphere light for better outdoor lighting
@@ -188,6 +209,16 @@ class Game {
                     rotation: this.playerController.getRotation()
                 });
             }
+        }
+
+        // Update culling for performance
+        if (this.worldManager) {
+            this.worldManager.updateCulling(this.camera);
+        }
+
+        // Update goblins
+        if (this.goblinSpawner) {
+            this.goblinSpawner.update(delta, this.camera);
         }
 
         // Update FPS counter

@@ -4,7 +4,8 @@ export class CharacterSelector {
         this.selectedCharacter = null;
 
         this.characters = [
-            { name: 'polygonesyntycharacter', display: 'Synty' }
+            { name: 'polygonesyntycharacter', display: 'Synty' },
+            { name: 'SK_Chr_Mage_01', display: 'Mage' }
         ];
 
         this.createUI();
@@ -122,7 +123,8 @@ export class CharacterSelector {
 
     getCharacterIcon(displayName) {
         const icons = {
-            'Synty': '⚔️'
+            'Synty': '⚔️',
+            'Mage': '🧙'
         };
         return icons[displayName] || '🎮';
     }

@@ -274,6 +274,7 @@ export class AssetLoader {
         // Check if it's a GLB character (Polygon Fantasy Kingdom characters start with SK_Chr_)
         const isGLB = characterName.toLowerCase().includes('polygon') ||
                       characterName.toLowerCase().includes('synty') ||
+                      characterName.toLowerCase().includes('goblin') ||
                       characterName.toLowerCase().startsWith('sk_chr_');
 
         if (isGLB) {

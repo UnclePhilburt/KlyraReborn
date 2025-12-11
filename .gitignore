@@ -23,6 +23,7 @@ nul
 POLYGON_Fantasy_Kingdom_SourceFiles_v4/
 ANIMATION_Base_Locomotion_SourceFiles_v3/
 glbcharacters/
+*.zip
 
 # Logs
 *.log

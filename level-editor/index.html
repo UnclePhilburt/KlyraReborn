@@ -32,8 +32,8 @@
         /* Main Layout */
         #app {
             display: grid;
-            grid-template-rows: 40px 1fr 200px 30px;
-            grid-template-columns: 280px 1fr 300px;
+            grid-template-rows: 35px 1fr auto 25px;
+            grid-template-columns: 260px 1fr 280px;
             height: 100vh;
         }
 
@@ -178,6 +178,7 @@
         #viewport {
             position: relative;
             background: #0a0a15;
+            overflow: hidden;
         }
 
         #viewport canvas {
@@ -479,8 +480,8 @@
 
         /* Foliage Section */
         .terrain-foliage-section {
-            margin-top: 20px;
-            padding-top: 15px;
+            margin-top: 10px;
+            padding-top: 10px;
             border-top: 1px solid var(--border);
         }
 
@@ -642,6 +643,26 @@
             border-top: 1px solid var(--border);
             display: flex;
             flex-direction: column;
+            resize: vertical;
+            overflow: auto;
+            height: 250px;
+            min-height: 150px;
+            max-height: 500px;
+        }
+
+        #content-browser::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--border);
+            cursor: ns-resize;
+        }
+
+        #content-browser::before:hover {
+            background: var(--accent);
         }
 
         #content-browser .tab-container {
@@ -756,6 +777,23 @@
             outline: none;
             border-color: var(--accent);
         }
+
+        #refresh-content-btn {
+            margin-left: 8px;
+            padding: 6px 12px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        #refresh-content-btn:hover {
+            background: var(--accent);
+            color: var(--bg-dark);
+            border-color: var(--accent);
+        }
     </style>
 </head>
 <body>
@@ -798,6 +836,26 @@
 
             <div class="toolbar-group">
                 <button class="toolbar-btn" id="btn-play" type="button" title="Test Level">Play</button>
+            </div>
+
+            <div class="toolbar-group" style="position: relative;">
+                <button class="toolbar-btn" id="btn-auto-populate" title="Auto Populate">Auto Populate ▼</button>
+                <div id="auto-populate-menu" style="display: none; position: absolute; top: 100%; left: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; min-width: 180px; z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+                    <button class="toolbar-btn" id="btn-auto-terrain" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Generate Terrain Height">🏔️ Generate Terrain</button>
+                    <button class="toolbar-btn" id="btn-flatten-terrain" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Flatten Terrain">⬜ Flatten Terrain</button>
+                    <button class="toolbar-btn" id="btn-auto-grass" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Grass">🌿 Auto Grass</button>
+                    <button class="toolbar-btn" id="btn-clear-grass" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Clear Auto Grass">❌ Clear Grass</button>
+                    <button class="toolbar-btn" id="btn-auto-flowers" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Flowers">🌸 Auto Flowers</button>
+                    <button class="toolbar-btn" id="btn-clear-flowers" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Clear Auto Flowers">❌ Clear Flowers</button>
+                    <button class="toolbar-btn" id="btn-auto-trees" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Trees">🌳 Auto Trees</button>
+                    <button class="toolbar-btn" id="btn-clear-trees" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Clear Auto Trees">❌ Clear Trees</button>
+                    <button class="toolbar-btn" id="btn-auto-bushes" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Bushes">🌳 Auto Bushes</button>
+                    <button class="toolbar-btn" id="btn-clear-bushes" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Clear Auto Bushes">❌ Clear Bushes</button>
+                    <button class="toolbar-btn" id="btn-auto-rocks" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Rocks">🪨 Auto Rocks</button>
+                    <button class="toolbar-btn" id="btn-clear-rocks" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Clear Auto Rocks">❌ Clear Rocks</button>
+                    <button class="toolbar-btn" id="btn-auto-town" style="width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--border);" title="Auto-Populate Buildings">🏘️ Auto Town</button>
+                    <button class="toolbar-btn" id="btn-clear-town" style="width: 100%; text-align: left; border: none;" title="Clear Auto Town">❌ Clear Town</button>
+                </div>
             </div>
         </div>
 
@@ -852,23 +910,6 @@
 
                     <div class="paint-instructions">
                         <small>Click "Paint Mode" then left-click and drag on terrain to paint the selected texture.</small>
-                    </div>
-
-                    <div class="terrain-foliage-section">
-                        <label class="section-label">Auto Foliage</label>
-                        <div class="slider-row">
-                            <label>Grass Density: <span id="grass-density-val">15%</span></label>
-                            <input type="range" id="grass-density" min="5" max="50" step="5" value="15">
-                        </div>
-                        <button class="terrain-tool-btn foliage-btn" id="btn-auto-grass" title="Scatter grass on grass-textured areas">
-                            Auto-Populate Grass
-                        </button>
-                        <button class="terrain-tool-btn foliage-btn" id="btn-clear-grass" title="Remove auto-generated grass">
-                            Clear Auto Grass
-                        </button>
-                        <div class="paint-instructions">
-                            <small>Automatically places grass props on areas painted with grass texture.</small>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -980,16 +1021,13 @@
                 </div>
             </div>
 
-            <div class="panel-header">Scene Hierarchy</div>
-            <div id="scene-tree">
-                <!-- Scene objects will be listed here -->
-            </div>
         </div>
 
         <!-- Content Browser (Bottom Panel) -->
         <div id="content-browser">
             <div id="content-search">
                 <input type="text" id="asset-search" placeholder="Search assets...">
+                <button id="refresh-content-btn" title="Refresh Content Browser">🔄</button>
             </div>
             <div id="content-browser-content">
                 <div id="content-categories">

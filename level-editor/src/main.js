@@ -189,12 +189,12 @@ class LevelEditor {
 
         // Directional light (sun)
         this.dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-        this.dirLight.position.set(50, 80, 50);
+        this.dirLight.position.set(50, 100, 50);
         this.dirLight.castShadow = true;
-        this.dirLight.shadow.camera.left = -60;
-        this.dirLight.shadow.camera.right = 60;
-        this.dirLight.shadow.camera.top = 60;
-        this.dirLight.shadow.camera.bottom = -60;
+        this.dirLight.shadow.camera.left = -100;
+        this.dirLight.shadow.camera.right = 100;
+        this.dirLight.shadow.camera.top = 100;
+        this.dirLight.shadow.camera.bottom = -100;
         this.dirLight.shadow.camera.near = 0.5;
         this.dirLight.shadow.camera.far = 200;
         this.dirLight.shadow.mapSize.width = 4096;
@@ -243,7 +243,14 @@ class LevelEditor {
     setupTerrain() {
         // Ground texture options for painting (3 texture channels: R, G, B)
         this.paintableTextures = [
-            { name: 'Grass', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Grass_01.png', color: '#4a7c4e' },
+            {
+                name: 'Grass',
+                diffuse: '/assets/textures/ground/Grass_cxbrutihf_4k_Diffuse.jpg',
+                normal: '/assets/textures/ground/Grass_cxbrutihf_4k_Normal.jpg',
+                roughness: '/assets/textures/ground/Grass_cxbrutihf_4k_Roughness.jpg',
+                ao: '/assets/textures/ground/Grass_cxbrutihf_4k_AmbientOcclusion.jpg',
+                color: '#4a7c4e'
+            },
             { name: 'Mud', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Mud_01.png', color: '#5c4a3a' },
             { name: 'Sand', diffuse: '/assets/textures/ground/PFK_Texture_Ground_Sand_01.png', color: '#c4a76c' }
         ];
@@ -280,12 +287,32 @@ class LevelEditor {
             return tex;
         };
 
+        // Load diffuse textures
         this.terrainTextures = this.paintableTextures.map(t => loadTexture(t.diffuse));
 
-        // Create custom material for terrain splatmap blending with shadow support
-        // Use MeshLambertMaterial with onBeforeCompile to inject splatmap logic
-        const terrainMaterial = new THREE.MeshLambertMaterial({
-            color: 0xffffff
+        // Load additional texture maps for grass (normal, roughness, AO)
+        this.terrainNormalMaps = this.paintableTextures.map(t => {
+            if (t.normal) return loadTexture(t.normal);
+            return null;
+        });
+        this.terrainRoughnessMaps = this.paintableTextures.map(t => {
+            if (t.roughness) return loadTexture(t.roughness);
+            return null;
+        });
+        this.terrainAOMaps = this.paintableTextures.map(t => {
+            if (t.ao) return loadTexture(t.ao);
+            return null;
+        });
+
+        // Create custom material for terrain splatmap blending with PBR support
+        const terrainMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: this.terrainTextures[0], // Use grass texture by default
+            normalMap: this.terrainNormalMaps[0],
+            roughnessMap: this.terrainRoughnessMaps[0],
+            aoMap: this.terrainAOMaps[0],
+            roughness: 0.8,
+            metalness: 0.0
         });
 
         // Store references for the shader modification
@@ -293,6 +320,12 @@ class LevelEditor {
         const tex0 = this.terrainTextures[0];
         const tex1 = this.terrainTextures[1];
         const tex2 = this.terrainTextures[2];
+        const normal0 = this.terrainNormalMaps[0];
+        const normal1 = this.terrainNormalMaps[1];
+        const normal2 = this.terrainNormalMaps[2];
+        const rough0 = this.terrainRoughnessMaps[0];
+        const rough1 = this.terrainRoughnessMaps[1];
+        const rough2 = this.terrainRoughnessMaps[2];
 
         terrainMaterial.onBeforeCompile = (shader) => {
             // Add custom uniforms
@@ -300,6 +333,12 @@ class LevelEditor {
             shader.uniforms.texture0 = { value: tex0 };
             shader.uniforms.texture1 = { value: tex1 };
             shader.uniforms.texture2 = { value: tex2 };
+            shader.uniforms.normalMap0 = { value: normal0 };
+            shader.uniforms.normalMap1 = { value: normal1 };
+            shader.uniforms.normalMap2 = { value: normal2 };
+            shader.uniforms.roughnessMap0 = { value: rough0 };
+            shader.uniforms.roughnessMap1 = { value: rough1 };
+            shader.uniforms.roughnessMap2 = { value: rough2 };
             shader.uniforms.textureScale = { value: 20.0 };
 
             // Add uniform declarations to vertex shader
@@ -327,6 +366,12 @@ class LevelEditor {
                 uniform sampler2D texture0;
                 uniform sampler2D texture1;
                 uniform sampler2D texture2;
+                uniform sampler2D normalMap0;
+                uniform sampler2D normalMap1;
+                uniform sampler2D normalMap2;
+                uniform sampler2D roughnessMap0;
+                uniform sampler2D roughnessMap1;
+                uniform sampler2D roughnessMap2;
                 varying vec2 vUvTerrain;
                 varying vec2 vUvScaled;`
             );
@@ -349,6 +394,7 @@ class LevelEditor {
                 }
                 diffuseColor *= terrainColor;`
             );
+
 
             // Store shader reference for texture updates
             this.terrainShader = shader;
@@ -431,13 +477,13 @@ class LevelEditor {
         const ctx = this.splatmapContext;
 
         // Convert world position to canvas pixel coordinates
-        // Terrain is 100x100 plane centered at origin, rotated -90° on X
-        // Match shader UV by flipping the splatmap texture in the shader instead
-        const px = ((worldPosition.x + 50) / 100) * canvas.width;
-        const py = ((worldPosition.z + 50) / 100) * canvas.height;
+        // Terrain is 500x500 plane centered at origin, rotated -90° on X
+        const terrainSize = 100;
+        const px = ((worldPosition.x + terrainSize / 2) / terrainSize) * canvas.width;
+        const py = ((worldPosition.z + terrainSize / 2) / terrainSize) * canvas.height;
 
         // Brush radius in pixels
-        const brushRadiusPx = (this.brushSize / 100) * canvas.width;
+        const brushRadiusPx = (this.brushSize / terrainSize) * canvas.width;
 
         // Get current image data in brush area
         const minX = Math.max(0, Math.floor(px - brushRadiusPx));
@@ -637,20 +683,103 @@ class LevelEditor {
             document.getElementById('brush-strength-val').textContent = this.brushStrength;
         });
 
-        // Grass density slider
-        document.getElementById('grass-density').addEventListener('input', (e) => {
-            document.getElementById('grass-density-val').textContent = e.target.value + '%';
+        // Auto-populate dropdown toggle
+        const autoPopulateBtn = document.getElementById('btn-auto-populate');
+        const autoPopulateMenu = document.getElementById('auto-populate-menu');
+
+        autoPopulateBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = autoPopulateMenu.style.display === 'block';
+            autoPopulateMenu.style.display = isVisible ? 'none' : 'block';
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', () => {
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-generate terrain button
+        document.getElementById('btn-auto-terrain').addEventListener('click', () => {
+            this.autoGenerateTerrain(10, 0.01);
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Flatten terrain button
+        document.getElementById('btn-flatten-terrain').addEventListener('click', () => {
+            this.flattenTerrain();
+            autoPopulateMenu.style.display = 'none';
         });
 
         // Auto-populate grass button
         document.getElementById('btn-auto-grass').addEventListener('click', () => {
-            const density = parseInt(document.getElementById('grass-density').value) / 100;
-            this.autoPopulateGrass(density, true);
+            this.autoPopulateGrass(0.12, true); // 12% coverage
+            autoPopulateMenu.style.display = 'none';
         });
 
         // Clear auto grass button
         document.getElementById('btn-clear-grass').addEventListener('click', () => {
             this.clearAutoGrass();
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-populate flowers button (default 5% density)
+        document.getElementById('btn-auto-flowers').addEventListener('click', () => {
+            this.autoPopulateFlowers(0.05, true);
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Clear auto flowers button
+        document.getElementById('btn-clear-flowers').addEventListener('click', () => {
+            this.clearAutoFlowers();
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-populate trees button
+        document.getElementById('btn-auto-trees').addEventListener('click', () => {
+            this.autoPopulateTrees(0.4, true); // Increased to 40% for a lot more trees
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Clear auto trees button
+        document.getElementById('btn-clear-trees').addEventListener('click', () => {
+            this.clearAutoTrees();
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-populate bushes button (default 6% density)
+        document.getElementById('btn-auto-bushes').addEventListener('click', () => {
+            this.autoPopulateBushes(0.06, true);
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Clear auto bushes button
+        document.getElementById('btn-clear-bushes').addEventListener('click', () => {
+            this.clearAutoBushes();
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-populate rocks button (default 5% density)
+        document.getElementById('btn-auto-rocks').addEventListener('click', () => {
+            this.autoPopulateRocks(0.05, true);
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Clear auto rocks button
+        document.getElementById('btn-clear-rocks').addEventListener('click', () => {
+            this.clearAutoRocks();
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Auto-populate buildings button
+        document.getElementById('btn-auto-town').addEventListener('click', () => {
+            this.autoPopulateTown(0.6, true); // 60% density - chance per city block
+            autoPopulateMenu.style.display = 'none';
+        });
+
+        // Clear auto buildings button
+        document.getElementById('btn-clear-town').addEventListener('click', () => {
+            this.clearAutoTown();
+            autoPopulateMenu.style.display = 'none';
         });
 
         // Terrain texture selector (legacy - now enters paint mode)
@@ -1821,19 +1950,13 @@ class LevelEditor {
     }
 
     updateSceneTree() {
-        const tree = document.getElementById('scene-tree');
-        tree.innerHTML = '';
-
-        this.levelObjects.forEach(obj => {
-            const item = document.createElement('div');
-            item.className = 'tree-item' + (obj === this.selectedObject ? ' selected' : '');
-            item.innerHTML = `
-                <span class="tree-icon">${this.getTypeIcon(obj.userData.type)}</span>
-                <span>${obj.userData.assetName || 'Object'}</span>
-            `;
-            item.addEventListener('click', () => this.selectObject(obj));
-            tree.appendChild(item);
-        });
+        // Scene tree removed - just ensure content browser stays visible
+        const contentBrowser = document.getElementById('content-browser');
+        if (contentBrowser) {
+            // Force it to be visible
+            contentBrowser.style.display = 'flex';
+            contentBrowser.style.visibility = 'visible';
+        }
     }
 
     getTypeIcon(type) {
@@ -2062,6 +2185,11 @@ class LevelEditor {
     }
 
     loadGLBForObject(filename, targetObj) {
+        // Initialize model cache if needed
+        if (!this.modelCache) {
+            this.modelCache = new Map();
+        }
+
         // Determine path based on object type
         const type = targetObj.userData?.type || 'buildings';
         const pathMap = {
@@ -2077,38 +2205,79 @@ class LevelEditor {
         const folder = pathMap[type] || 'buildings';
         const path = `/assets/${folder}/${filename}`;
 
-        this.gltfLoader.load(
-            path,
-            (gltf) => {
-                const model = gltf.scene;
-                model.traverse(child => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
+        // Check if model is already cached
+        if (this.modelCache.has(filename)) {
+            // Clone and share geometry/materials from cached model
+            const cachedModel = this.modelCache.get(filename);
+            const model = cachedModel.clone();
 
-                // Copy transform
-                model.position.copy(targetObj.position);
-                model.rotation.copy(targetObj.rotation);
-                model.scale.copy(targetObj.scale);
-                model.userData = { ...targetObj.userData };
-
-                // Replace in scene
-                const index = this.levelObjects.indexOf(targetObj);
-                if (index > -1) {
-                    this.scene.remove(targetObj);
-                    this.scene.add(model);
-                    this.levelObjects[index] = model;
-
-                    if (this.selectedObject === targetObj) {
-                        this.selectObject(model);
-                    }
+            // Share geometry and materials to save memory
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    cachedModel.traverse((cachedChild) => {
+                        if (cachedChild.isMesh && cachedChild.name === child.name) {
+                            child.geometry = cachedChild.geometry; // Share geometry
+                            child.material = cachedChild.material; // Share material
+                        }
+                    });
                 }
-            },
-            undefined,
-            (error) => console.warn('Could not load GLB:', filename, error)
-        );
+            });
+
+            // Copy transform
+            model.position.copy(targetObj.position);
+            model.rotation.copy(targetObj.rotation);
+            model.scale.copy(targetObj.scale);
+            model.userData = { ...targetObj.userData };
+
+            // Replace in scene
+            const index = this.levelObjects.indexOf(targetObj);
+            if (index > -1) {
+                this.scene.remove(targetObj);
+                this.scene.add(model);
+                this.levelObjects[index] = model;
+
+                if (this.selectedObject === targetObj) {
+                    this.selectObject(model);
+                }
+            }
+        } else {
+            // Load model for the first time and cache it
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const model = gltf.scene;
+                    model.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Cache the base model
+                    this.modelCache.set(filename, model.clone());
+
+                    // Copy transform
+                    model.position.copy(targetObj.position);
+                    model.rotation.copy(targetObj.rotation);
+                    model.scale.copy(targetObj.scale);
+                    model.userData = { ...targetObj.userData };
+
+                    // Replace in scene
+                    const index = this.levelObjects.indexOf(targetObj);
+                    if (index > -1) {
+                        this.scene.remove(targetObj);
+                        this.scene.add(model);
+                        this.levelObjects[index] = model;
+
+                        if (this.selectedObject === targetObj) {
+                            this.selectObject(model);
+                        }
+                    }
+                },
+                undefined,
+                (error) => console.warn('Could not load GLB:', filename, error)
+            );
+        }
     }
 
     testLevel() {
@@ -2424,11 +2593,43 @@ class LevelEditor {
             // Load terrain heights
             if (data.terrain && data.terrain.heights) {
                 const positions = this.terrain.geometry.attributes.position;
-                data.terrain.heights.forEach((h, i) => {
-                    if (i < positions.count) {
-                        positions.setZ(i, h);
+                const heightCount = data.terrain.heights.length;
+                const vertexCount = positions.count;
+
+                // Handle terrain resolution mismatch (old 200x200 vs new 100x100)
+                if (heightCount > vertexCount) {
+                    console.warn(`⚠️ Terrain resolution mismatch: saved has ${heightCount} vertices, current has ${vertexCount} vertices`);
+                    console.log('Downsampling terrain to match current resolution...');
+
+                    // Simple downsampling - just copy every Nth vertex
+                    const skipRatio = Math.sqrt(heightCount / vertexCount);
+                    const oldGridSize = Math.round(Math.sqrt(heightCount));
+                    const newGridSize = Math.round(Math.sqrt(vertexCount));
+
+                    let copied = 0;
+                    for (let z = 0; z < newGridSize; z++) {
+                        for (let x = 0; x < newGridSize; x++) {
+                            const oldX = Math.floor(x * skipRatio);
+                            const oldZ = Math.floor(z * skipRatio);
+                            const oldIndex = oldZ * oldGridSize + oldX;
+                            const newIndex = z * newGridSize + x;
+
+                            if (oldIndex < heightCount && newIndex < vertexCount) {
+                                positions.setZ(newIndex, data.terrain.heights[oldIndex]);
+                                copied++;
+                            }
+                        }
                     }
-                });
+                    console.log(`✅ Downsampled ${copied} vertices`);
+                } else {
+                    // Direct copy when resolutions match or saved is smaller
+                    const count = Math.min(heightCount, vertexCount);
+                    for (let i = 0; i < count; i++) {
+                        positions.setZ(i, data.terrain.heights[i]);
+                    }
+                    console.log(`✅ Loaded ${count} terrain vertices`);
+                }
+
                 positions.needsUpdate = true;
                 this.terrain.geometry.computeVertexNormals();
             }
@@ -2446,14 +2647,49 @@ class LevelEditor {
                 img.src = data.splatmap;
             }
 
-            // Load objects
-            if (data.objects) {
-                data.objects.forEach(objData => {
-                    this.createObjectFromData(objData);
-                });
-            }
+            // Load objects in batches to prevent browser crashes
+            if (data.objects && data.objects.length > 0) {
+                const totalObjects = data.objects.length;
 
-            console.log(`Loaded chunk ${key} with ${data.objects?.length || 0} objects`);
+                console.log(`Loading ${totalObjects} objects slowly to prevent crashes...`);
+
+                // Prioritize loading buildings/trees over grass
+                const prioritizedObjects = [
+                    ...data.objects.filter(o => o.type === 'buildings'),
+                    ...data.objects.filter(o => o.type === 'trees'),
+                    ...data.objects.filter(o => o.type === 'rocks'),
+                    ...data.objects.filter(o => o.type === 'flowers'),
+                    ...data.objects.filter(o => o.type === 'grass'),
+                    ...data.objects.filter(o => !['buildings', 'trees', 'rocks', 'flowers', 'grass'].includes(o.type))
+                ];
+
+                // Load ONE object at a time with delay to prevent memory spikes
+                let loaded = 0;
+
+                const loadNext = () => {
+                    if (loaded < prioritizedObjects.length) {
+                        this.createObjectFromData(prioritizedObjects[loaded]);
+                        loaded++;
+
+                        // Log progress every 50 objects
+                        if (loaded % 50 === 0) {
+                            console.log(`Loaded ${loaded}/${prioritizedObjects.length} objects...`);
+                        }
+
+                        // Schedule next object with delay
+                        // Longer delay for grass/flowers, shorter for buildings
+                        const objType = prioritizedObjects[loaded - 1]?.type;
+                        const delay = (objType === 'grass' || objType === 'flowers') ? 5 : 20;
+                        setTimeout(loadNext, delay);
+                    } else {
+                        console.log(`✅ Loaded chunk ${key} with ${loaded} objects`);
+                    }
+                };
+
+                loadNext();
+            } else {
+                console.log(`Loaded chunk ${key} with 0 objects`);
+            }
         } else {
             // New chunk - reset terrain to flat
             const positions = this.terrain.geometry.attributes.position;
@@ -2709,17 +2945,32 @@ class LevelEditor {
             });
         }
 
-        // Grass asset options (GLB files for better performance)
+        // Grass asset options - ORDERED BY SIZE (large first, then tall, then medium/short)
         const grassAssets = [
-            { file: 'SM_Env_Grass_Short_Clump_01.glb', weight: 3 },
-            { file: 'SM_Env_Grass_Short_Clump_02.glb', weight: 3 },
-            { file: 'SM_Env_Grass_Short_Clump_03.glb', weight: 3 },
+            // Large grass - 75% of spawns
+            { file: 'SM_Env_Grass_Large_01.glb', weight: 40 },
+            { file: 'SM_Env_Grass_Large_03.glb', weight: 35 },
+            // Tall grass - 15%
+            { file: 'SM_Env_Grass_Tall_Clump_01.glb', weight: 3 },
+            { file: 'SM_Env_Grass_Tall_Clump_02.glb', weight: 3 },
+            { file: 'SM_Env_Grass_Tall_Clump_03.glb', weight: 3 },
+            { file: 'SM_Env_Grass_Tall_Clump_04.glb', weight: 3 },
+            { file: 'SM_Env_Grass_Tall_Clump_05.glb', weight: 3 },
+            { file: 'SM_Env_Grass_Tall_Plane_01.glb', weight: 0 },
+            // Medium grass - 5%
             { file: 'SM_Env_Grass_Med_Clump_01.glb', weight: 2 },
             { file: 'SM_Env_Grass_Med_Clump_02.glb', weight: 2 },
-            { file: 'SM_Env_Grass_Med_Clump_03.glb', weight: 2 },
-            { file: 'SM_Env_Grass_Tall_Clump_01.glb', weight: 1 },
-            { file: 'SM_Env_Grass_Tall_Clump_02.glb', weight: 1 },
-            { file: 'SM_Env_Grass_Bush_01.glb', weight: 0.5 }
+            { file: 'SM_Env_Grass_Med_Clump_03.glb', weight: 1 },
+            { file: 'SM_Env_Grass_Med_Plane_01.glb', weight: 0 },
+            // Short grass - 3%
+            { file: 'SM_Env_Grass_Short_Clump_01.glb', weight: 1 },
+            { file: 'SM_Env_Grass_Short_Clump_02.glb', weight: 1 },
+            { file: 'SM_Env_Grass_Short_Clump_03.glb', weight: 1 },
+            { file: 'SM_Env_Grass_Short_Plane_01.glb', weight: 0 },
+            // Bush and crops - 2%
+            { file: 'SM_Env_Grass_Bush_01.glb', weight: 1 },
+            { file: 'SM_Env_CropField_Clump_01.glb', weight: 0.5 },
+            { file: 'SM_Env_CropField_Clump_02.glb', weight: 0.5 }
         ];
 
         // Build weighted array for random selection
@@ -2732,16 +2983,17 @@ class LevelEditor {
 
         // Get splatmap data to check grass texture (R channel)
         const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
-        const terrainSize = 100; // Terrain is 100x100 units
+        const terrainSize = 100; // Terrain is 500x500 units
         const splatmapSize = 512;
 
-        let grassCount = 0;
-        const maxGrass = 500; // Limit for performance
+        // Collect ALL potential grass positions first
+        const allPotentialPositions = [];
+        const maxGrass = 50; // Limit per chunk for performance
 
         // Sample the terrain at regular intervals
-        const step = 2; // Check every 2 units
-        for (let x = -terrainSize / 2; x < terrainSize / 2 && grassCount < maxGrass; x += step) {
-            for (let z = -terrainSize / 2; z < terrainSize / 2 && grassCount < maxGrass; z += step) {
+        const step = 2; // Moderate spacing
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
                 // Add randomness to position within the cell
                 const worldX = x + (Math.random() - 0.5) * step;
                 const worldZ = z + (Math.random() - 0.5) * step;
@@ -2750,57 +3002,1482 @@ class LevelEditor {
                 const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
                 const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
 
-                // Get pixel index (splatmap is flipped)
-                const pixelIndex = (splatZ * splatmapSize + splatX) * 4;
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Random chance based on density (spawn everywhere, ignore splatmap)
+                if (Math.random() > density) continue;
+
+                // Pick random grass asset
+                const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
+                const isLargeGrass = randomFile.includes('_Large_');
+
+                // Get terrain height at this position
+                const terrainY = this.getTerrainHeightAt(worldX, worldZ);
+
+                allPotentialPositions.push({
+                    x: worldX,
+                    y: terrainY,
+                    z: worldZ,
+                    rotation: Math.random() * Math.PI * 2,
+                    scale: 0.8 + Math.random() * 0.4,
+                    file: randomFile,
+                    isLarge: isLargeGrass
+                });
+            }
+        }
+
+        // Shuffle and limit to maxGrass to get even distribution across terrain
+        const shuffled = allPotentialPositions.sort(() => Math.random() - 0.5);
+        const grassPositions = shuffled.slice(0, maxGrass);
+
+        console.log(`Placing ${grassPositions.length} grass objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        grassPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Sort files by size: Large first, then Tall, then Med, then Short
+        const uniqueFiles = Object.keys(positionsByFile).sort((a, b) => {
+            const getSizeOrder = (filename) => {
+                if (filename.includes('_Large_')) return 0;
+                if (filename.includes('_Tall_')) return 1;
+                if (filename.includes('_Med_')) return 2;
+                if (filename.includes('_Short_')) return 3;
+                return 4; // Bush/crops last
+            };
+            return getSizeOrder(a) - getSizeOrder(b);
+        });
+
+        let totalPlaced = 0;
+
+        // Load grass models sequentially in size order (large to small)
+        const loadNextGrassModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} grass objects using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/nature/grass/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    const isLargeFile = filename.includes('_Large_');
+
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            // Disable shadows for large grass only
+                            if (isLargeFile) {
+                                child.castShadow = false;
+                                child.receiveShadow = false;
+                            } else {
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+                    const isTallFile = filename.includes('_Tall_');
+
+                    console.log(`Loading ${positions.length} instances of ${filename} in batches...`);
+
+                    // Process in batches of 50 to prevent freezing
+                    const batchSize = 50;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+
+                            const grassObj = baseModel.clone();
+
+                        // Share geometry and materials to save memory
+                        grassObj.traverse((child) => {
+                            if (child.isMesh && baseModel) {
+                                // Find corresponding mesh in base model
+                                baseModel.traverse((baseChild) => {
+                                    if (baseChild.isMesh && baseChild.name === child.name) {
+                                        child.geometry = baseChild.geometry; // Share geometry
+                                        child.material = baseChild.material; // Share material
+                                    }
+                                });
+                            }
+                        });
+
+                        // Use the terrain height already calculated (more accurate than raycast)
+                        grassObj.position.set(pos.x, pos.y, pos.z);
+                        grassObj.rotation.y = pos.rotation;
+                        grassObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                        grassObj.userData = {
+                            type: 'grass',
+                            file: filename,
+                            name: `Grass_${totalPlaced}`,
+                            autoGenerated: 'grass'
+                        };
+
+                        this.scene.add(grassObj);
+                        this.levelObjects.push(grassObj);
+                        totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        // Process next batch after a short delay
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 10); // 10ms delay between batches
+                        } else {
+                            // All batches done for this model, load next model
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextGrassModel(index + 1);
+                        }
+                    };
+
+                    // Start processing first batch
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load grass model:', filename, error);
+                    // Continue to next model even if this one fails
+                    loadNextGrassModel(index + 1);
+                }
+            );
+        };
+
+        // Start loading from the first model
+        loadNextGrassModel(0);
+
+        return grassPositions.length;
+    }
+
+    // Auto-populate flowers on grass-textured areas
+    autoPopulateFlowers(density = 0.05, clearExisting = false) {
+        if (clearExisting) {
+            // Remove existing auto-generated flowers
+            const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'flowers');
+            toRemove.forEach(obj => {
+                this.scene.remove(obj);
+                const idx = this.levelObjects.indexOf(obj);
+                if (idx > -1) this.levelObjects.splice(idx, 1);
+            });
+        }
+
+        // Flower asset options
+        const flowerAssets = [
+            // Wildflowers - most common
+            { file: 'SM_Env_Wildflowers_01.glb', weight: 3 },
+            { file: 'SM_Env_Wildflowers_02.glb', weight: 3 },
+            { file: 'SM_Env_Wildflowers_03.glb', weight: 3 },
+            { file: 'SM_Env_Wildflowers_Patch_01.glb', weight: 2 },
+            { file: 'SM_Env_Wildflowers_Patch_02.glb', weight: 2 },
+            { file: 'SM_Env_Wildflowers_Patch_03.glb', weight: 2 },
+            // Flat flowers - common
+            { file: 'SM_Env_Flowers_Flat_01.glb', weight: 2 },
+            { file: 'SM_Env_Flowers_Flat_02.glb', weight: 2 },
+            { file: 'SM_Env_Flowers_Flat_03.glb', weight: 2 },
+            // Lillies - less common
+            { file: 'SM_Env_Lillies_01.glb', weight: 1 },
+            { file: 'SM_Env_Lillies_02.glb', weight: 1 },
+            { file: 'SM_Env_Lillies_03.glb', weight: 1 },
+            // Special flowers - rare
+            { file: 'SM_Env_Rapeseed_Clump_01.glb', weight: 0.5 },
+            { file: 'SM_Env_Rapeseed_Clump_02.glb', weight: 0.5 },
+            { file: 'SM_Env_Sunflower_01.glb', weight: 0.5 }
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        flowerAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset.file);
+            }
+        });
+
+        // Get splatmap data to check grass texture (R channel)
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect all flower positions first
+        const flowerPositions = [];
+        const maxFlowers = 300;
+
+        // Sample the terrain - flowers are more sparse than grass
+        const step = 4;
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
+                // Add randomness to position within the cell
+                const worldX = x + (Math.random() - 0.5) * step;
+                const worldZ = z + (Math.random() - 0.5) * step;
+
+                // Convert world position to splatmap coordinates
+                const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
+                const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
+
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Get pixel index
+                const pixelIndex = (clampedZ * splatmapSize + clampedX) * 4;
                 const r = imageData.data[pixelIndex]; // Grass channel
 
-                // Check if this is grass texture (R channel high)
+                // Check if this is grass texture (flowers spawn on grass)
                 if (r > 200) {
                     // Random chance based on density
                     if (Math.random() > density) continue;
 
-                    // Check if there's already an object nearby
-                    const tooClose = this.levelObjects.some(obj => {
+                    // Check if there's already any object nearby
+                    const minDistance = 3.0; // Flowers more sparse than grass
+
+                    // Check against already placed flowers in this session
+                    const tooCloseToFlowers = flowerPositions.some(pos => {
+                        const dx = pos.x - worldX;
+                        const dz = pos.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToFlowers) continue;
+
+                    // Check against all existing objects in the scene
+                    const tooCloseToObjects = this.levelObjects.some(obj => {
+                        if (!obj.position) return false;
                         const dx = obj.position.x - worldX;
                         const dz = obj.position.z - worldZ;
-                        return Math.sqrt(dx * dx + dz * dz) < 1.5;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
                     });
-                    if (tooClose) continue;
+                    if (tooCloseToObjects) continue;
 
                     // Get terrain height at this position
                     const terrainY = this.getTerrainHeightAt(worldX, worldZ);
 
-                    // Pick random grass asset
+                    // Pick random flower asset
                     const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
 
-                    // Create grass object
-                    const grassObj = new THREE.Group();
-                    grassObj.position.set(worldX, terrainY, worldZ);
-                    grassObj.rotation.y = Math.random() * Math.PI * 2;
-                    const scale = 0.8 + Math.random() * 0.4;
-                    grassObj.scale.set(scale, scale, scale);
-
-                    grassObj.userData = {
-                        type: 'grass',
-                        file: randomFile,
-                        name: `Grass_${grassCount}`,
-                        autoGenerated: 'grass'
-                    };
-
-                    // Load the GLB model
-                    this.loadGLBForObject(randomFile, grassObj);
-
-                    this.scene.add(grassObj);
-                    this.levelObjects.push(grassObj);
-                    grassCount++;
+                    flowerPositions.push({
+                        x: worldX,
+                        y: terrainY,
+                        z: worldZ,
+                        rotation: Math.random() * Math.PI * 2,
+                        scale: 0.8 + Math.random() * 0.4,
+                        file: randomFile
+                    });
                 }
             }
         }
 
-        console.log(`Auto-populated ${grassCount} grass objects`);
+        console.log(`Placing ${flowerPositions.length} flower objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        flowerPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Load unique flower models and clone them for each position
+        const uniqueFiles = Object.keys(positionsByFile);
+        let totalPlaced = 0;
+
+        const loadNextFlowerModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} flower objects using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/nature/flowers/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+
+                    // Process in batches of 50 to prevent freezing
+                    const batchSize = 50;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+                            const flowerObj = baseModel.clone();
+                            // Share geometry and materials to save memory
+                            flowerObj.traverse((child) => {
+                                if (child.isMesh && baseModel) {
+                                    // Find corresponding mesh in base model
+                                    baseModel.traverse((baseChild) => {
+                                        if (baseChild.isMesh && baseChild.name === child.name) {
+                                            child.geometry = baseChild.geometry; // Share geometry
+                                            child.material = baseChild.material; // Share material
+                                        }
+                                    });
+                                }
+                            });
+                            flowerObj.position.set(pos.x, pos.y, pos.z);
+                            flowerObj.rotation.y = pos.rotation;
+                            flowerObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                            flowerObj.userData = {
+                                type: 'flowers',
+                                file: filename,
+                                name: `Flower_${totalPlaced}`,
+                                autoGenerated: 'flowers'
+                            };
+
+                            this.scene.add(flowerObj);
+                            this.levelObjects.push(flowerObj);
+                            totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        // Process next batch after a short delay
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 10); // 10ms delay between batches
+                        } else {
+                            // All batches done for this model, load next model
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextFlowerModel(index + 1);
+                        }
+                    };
+
+                    // Start processing first batch
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load flower model:', filename, error);
+                    loadNextFlowerModel(index + 1);
+                }
+            );
+        };
+
+        // Start loading first model
+        loadNextFlowerModel(0);
+
+        return flowerPositions.length;
+    }
+
+    clearAutoFlowers() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'flowers');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated flowers`);
         this.updateSceneTree();
         this.updateStatusBar();
-        return grassCount;
+    }
+
+    // Auto-populate trees on grass-textured areas
+    autoPopulateTrees(density = 0.08, clearExisting = false) {
+        if (clearExisting) {
+            // Remove existing auto-generated trees
+            const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'trees');
+            toRemove.forEach(obj => {
+                this.scene.remove(obj);
+                const idx = this.levelObjects.indexOf(obj);
+                if (idx > -1) this.levelObjects.splice(idx, 1);
+            });
+        }
+
+        // Tree asset options
+        const treeAssets = [
+            // Meadow trees - most common
+            { file: 'SM_Env_Tree_Meadow_01.glb', weight: 3 },
+            { file: 'SM_Env_Tree_Meadow_02.glb', weight: 3 },
+            // Birch trees - common
+            { file: 'SM_Env_Tree_Birch_01.glb', weight: 2 },
+            { file: 'SM_Env_Tree_Birch_02.glb', weight: 2 },
+            { file: 'SM_Env_Tree_Birch_03.glb', weight: 2 },
+            // Fruit trees - less common
+            { file: 'SM_Env_Tree_Fruit_01.glb', weight: 1 },
+            { file: 'SM_Env_Tree_Fruit_02.glb', weight: 1 },
+            { file: 'SM_Env_Tree_Fruit_03.glb', weight: 1 },
+            // Bushes - occasional
+            { file: 'SM_Env_Bush_01.glb', weight: 1 },
+            { file: 'SM_Env_Bush_02.glb', weight: 1 },
+            { file: 'SM_Env_Bush_03.glb', weight: 1 }
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        treeAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset.file);
+            }
+        });
+
+        // Get splatmap data to check grass texture (R channel)
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect all tree positions first
+        const treePositions = [];
+        const maxTrees = 100;
+
+        // Sample the terrain - trees are very sparse
+        const step = 8;
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
+                // Add randomness to position within the cell
+                const worldX = x + (Math.random() - 0.5) * step;
+                const worldZ = z + (Math.random() - 0.5) * step;
+
+                // Convert world position to splatmap coordinates
+                const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
+                const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
+
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Get pixel index
+                const pixelIndex = (clampedZ * splatmapSize + clampedX) * 4;
+                const r = imageData.data[pixelIndex]; // Grass channel
+
+                // Check if this is grass texture (trees spawn on grass)
+                if (r > 200) {
+                    // Random chance based on density
+                    if (Math.random() > density) continue;
+
+                    // Check if there's already a tree nearby
+                    const minDistance = 4.0; // Trees need space from each other
+
+                    // Check against already placed trees in this session
+                    const tooCloseToTrees = treePositions.some(pos => {
+                        const dx = pos.x - worldX;
+                        const dz = pos.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToTrees) continue;
+
+                    // Check against existing trees only (not grass/flowers)
+                    const tooCloseToExistingTrees = this.levelObjects.some(obj => {
+                        if (!obj.position) return false;
+                        if (obj.userData?.autoGenerated !== 'trees' && obj.userData?.type !== 'trees') return false;
+                        const dx = obj.position.x - worldX;
+                        const dz = obj.position.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToExistingTrees) continue;
+
+                    // Get terrain height at this position
+                    const terrainY = this.getTerrainHeightAt(worldX, worldZ);
+
+                    // Pick random tree asset
+                    const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
+
+                    treePositions.push({
+                        x: worldX,
+                        y: terrainY,
+                        z: worldZ,
+                        rotation: Math.random() * Math.PI * 2,
+                        scale: 0.9 + Math.random() * 0.3,
+                        file: randomFile
+                    });
+                }
+            }
+        }
+
+        console.log(`Placing ${treePositions.length} tree objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        treePositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Load unique tree models sequentially (not all at once)
+        const uniqueFiles = Object.keys(positionsByFile);
+        let totalPlaced = 0;
+
+        const loadNextTreeModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} tree objects using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/nature/trees/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+
+                    // Process in batches of 50 to prevent freezing
+                    const batchSize = 50;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+                            const treeObj = baseModel.clone();
+                            // Share geometry and materials to save memory
+                            treeObj.traverse((child) => {
+                                if (child.isMesh && baseModel) {
+                                    // Find corresponding mesh in base model
+                                    baseModel.traverse((baseChild) => {
+                                        if (baseChild.isMesh && baseChild.name === child.name) {
+                                            child.geometry = baseChild.geometry; // Share geometry
+                                            child.material = baseChild.material; // Share material
+                                        }
+                                    });
+                                }
+                            });
+                            treeObj.position.set(pos.x, pos.y, pos.z);
+                            treeObj.rotation.y = pos.rotation;
+                            treeObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                            treeObj.userData = {
+                                type: 'trees',
+                                file: filename,
+                                name: `Tree_${totalPlaced}`,
+                                autoGenerated: 'trees'
+                            };
+
+                            this.scene.add(treeObj);
+                            this.levelObjects.push(treeObj);
+                            totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        // Process next batch after a short delay
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 10); // 10ms delay between batches
+                        } else {
+                            // All batches done for this model, load next model
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextTreeModel(index + 1);
+                        }
+                    };
+
+                    // Start processing first batch
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load tree model:', filename, error);
+                    loadNextTreeModel(index + 1);
+                }
+            );
+        };
+
+        // Start loading first model
+        loadNextTreeModel(0);
+
+        return treePositions.length;
+    }
+
+    clearAutoTrees() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'trees');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated trees`);
+        this.updateSceneTree();
+        this.updateStatusBar();
+    }
+
+    // Auto-populate rocks on grass-textured areas
+    autoPopulateRocks(density = 0.05, clearExisting = false) {
+        if (clearExisting) {
+            // Remove existing auto-generated rocks
+            const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'rocks');
+            toRemove.forEach(obj => {
+                this.scene.remove(obj);
+                const idx = this.levelObjects.indexOf(obj);
+                if (idx > -1) this.levelObjects.splice(idx, 1);
+            });
+        }
+
+        // Rock asset options
+        const rockAssets = [
+            // Regular rocks - most common
+            { file: 'SM_Env_Rock_01.glb', weight: 3 },
+            { file: 'SM_Env_Rock_02.glb', weight: 3 },
+            { file: 'SM_Env_Rock_03.glb', weight: 3 },
+            { file: 'SM_Env_Rock_04.glb', weight: 3 },
+            { file: 'SM_Env_Rock_05.glb', weight: 3 },
+            { file: 'SM_Env_Rock_06.glb', weight: 3 },
+            // Ground rocks - common
+            { file: 'SM_Env_Rock_Ground_01.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Ground_02.glb', weight: 2 },
+            // Rock piles - common
+            { file: 'SM_Env_Rock_Pile_01.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_02.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_03.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_04.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_05.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_06.glb', weight: 2 },
+            { file: 'SM_Env_Rock_Pile_07.glb', weight: 2 },
+            // Small rocks - very common
+            { file: 'SM_Env_Rock_Small_01.glb', weight: 4 },
+            { file: 'SM_Env_Rock_Small_Pile_01.glb', weight: 3 },
+            { file: 'SM_Env_Rock_Small_Pile_02.glb', weight: 3 },
+            // Round rock - occasional
+            { file: 'SM_Env_Rock_Round_01.glb', weight: 2 },
+            // Cliff rocks - rare (larger)
+            { file: 'SM_Env_Rock_Cliff_01.glb', weight: 1 },
+            { file: 'SM_Env_Rock_Cliff_02.glb', weight: 1 },
+            { file: 'SM_Env_Rock_Cliff_03.glb', weight: 1 }
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        rockAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset.file);
+            }
+        });
+
+        // Get splatmap data to check grass texture (R channel)
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect all rock positions first
+        const rockPositions = [];
+
+        // Sample the terrain - rocks are moderately sparse
+        const step = 5;
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
+
+                // Add randomness to position within the cell
+                const worldX = x + (Math.random() - 0.5) * step;
+                const worldZ = z + (Math.random() - 0.5) * step;
+
+                // Convert world position to splatmap coordinates
+                const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
+                const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
+
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Get pixel index
+                const pixelIndex = (clampedZ * splatmapSize + clampedX) * 4;
+                const r = imageData.data[pixelIndex]; // Grass channel
+
+                // Check if this is grass texture (rocks spawn on grass)
+                if (r > 200) {
+                    // Random chance based on density
+                    if (Math.random() > density) continue;
+
+                    // Check if there's already a rock nearby
+                    const minDistance = 2.0; // Rocks can be fairly close
+
+                    // Check against already placed rocks in this session
+                    const tooCloseToRocks = rockPositions.some(pos => {
+                        const dx = pos.x - worldX;
+                        const dz = pos.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToRocks) continue;
+
+                    // Check against existing rocks only
+                    const tooCloseToExistingRocks = this.levelObjects.some(obj => {
+                        if (!obj.position) return false;
+                        if (obj.userData?.autoGenerated !== 'rocks' && obj.userData?.type !== 'rocks') return false;
+                        const dx = obj.position.x - worldX;
+                        const dz = obj.position.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToExistingRocks) continue;
+
+                    // Get terrain height at this position
+                    const terrainY = this.getTerrainHeightAt(worldX, worldZ);
+
+                    // Pick random rock asset
+                    const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
+
+                    rockPositions.push({
+                        x: worldX,
+                        y: terrainY,
+                        z: worldZ,
+                        rotation: Math.random() * Math.PI * 2,
+                        scale: 0.8 + Math.random() * 0.4, // Varied sizes
+                        file: randomFile
+                    });
+                }
+            }
+        }
+
+        console.log(`Placing ${rockPositions.length} rock objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        rockPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Load unique rock models and clone them for each position
+        const uniqueFiles = Object.keys(positionsByFile);
+        let totalPlaced = 0;
+
+        const loadNextRockModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} rock objects using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/nature/rocks/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+
+                    // Process in batches of 50 to prevent freezing
+                    const batchSize = 50;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+                            const rockObj = baseModel.clone();
+                            // Share geometry and materials to save memory
+                            rockObj.traverse((child) => {
+                                if (child.isMesh && baseModel) {
+                                    // Find corresponding mesh in base model
+                                    baseModel.traverse((baseChild) => {
+                                        if (baseChild.isMesh && baseChild.name === child.name) {
+                                            child.geometry = baseChild.geometry; // Share geometry
+                                            child.material = baseChild.material; // Share material
+                                        }
+                                    });
+                                }
+                            });
+                            rockObj.position.set(pos.x, pos.y, pos.z);
+                            rockObj.rotation.y = pos.rotation;
+                            rockObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                            rockObj.userData = {
+                                type: 'rocks',
+                                file: filename,
+                                name: `Rock_${totalPlaced}`,
+                                autoGenerated: 'rocks'
+                            };
+
+                            this.scene.add(rockObj);
+                            this.levelObjects.push(rockObj);
+                            totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        // Process next batch after a short delay
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 10); // 10ms delay between batches
+                        } else {
+                            // All batches done for this model, load next model
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextRockModel(index + 1);
+                        }
+                    };
+
+                    // Start processing first batch
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load rock model:', filename, error);
+                    loadNextRockModel(index + 1);
+                }
+            );
+        };
+
+        // Start loading first model
+        loadNextRockModel(0);
+
+        return rockPositions.length;
+    }
+
+    clearAutoRocks() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'rocks');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated rocks`);
+        this.updateSceneTree();
+        this.updateStatusBar();
+    }
+
+    // Auto-generate terrain height with varied hills, valleys, and flat areas
+    autoGenerateTerrain(intensity = 4, scale = 0.015) {
+        if (!this.terrain) return;
+
+        const geometry = this.terrain.geometry;
+        const positions = geometry.attributes.position;
+
+        console.log('Generating varied terrain with hills, valleys, and flats...');
+
+        // Random seed for each generation
+        const seed = Math.random() * 10000;
+
+        // Simple pseudo-random noise function with seed
+        const random2D = (x, z) => {
+            const dot = (x + seed) * 12.9898 + (z + seed) * 78.233;
+            return Math.abs(Math.sin(dot) * 43758.5453) % 1;
+        };
+
+        // Smooth interpolation
+        const smoothstep = (t) => t * t * (3 - 2 * t);
+
+        // Smooth rolling terrain - only low frequency features
+        const variedTerrain = (x, z) => {
+            let height = 0;
+            let amplitude = 1.0;
+            let frequency = scale;
+
+            // Use fewer octaves and reduce amplitude faster for smoother terrain
+            for (let octave = 0; octave < 3; octave++) {
+                // Get grid coordinates
+                const gridX = Math.floor(x * frequency);
+                const gridZ = Math.floor(z * frequency);
+
+                // Get fractional parts
+                const fracX = (x * frequency) - gridX;
+                const fracZ = (z * frequency) - gridZ;
+
+                // Get random values at grid corners
+                const v00 = random2D(gridX, gridZ);
+                const v10 = random2D(gridX + 1, gridZ);
+                const v01 = random2D(gridX, gridZ + 1);
+                const v11 = random2D(gridX + 1, gridZ + 1);
+
+                // Smooth interpolation
+                const sx = smoothstep(fracX);
+                const sz = smoothstep(fracZ);
+
+                const v0 = v00 * (1 - sx) + v10 * sx;
+                const v1 = v01 * (1 - sx) + v11 * sx;
+                const value = v0 * (1 - sz) + v1 * sz;
+
+                // Add this octave (centered around 0)
+                height += (value - 0.5) * amplitude;
+
+                // Increase frequency, decrease amplitude more aggressively for smoothness
+                frequency *= 1.8;
+                amplitude *= 0.35;
+            }
+
+            // Add some very large, smooth features (hills and valleys)
+            const largeFeat1 = Math.sin(x * scale * 0.2) * Math.cos(z * scale * 0.2) * 1.0;
+            const largeFeat2 = Math.cos(x * scale * 0.15) * Math.sin(z * scale * 0.16) * 0.7;
+            const largeFeat3 = Math.sin(x * scale * 0.1) * Math.cos(z * scale * 0.11) * 0.5;
+
+            // Create smoothly interpolated regions to avoid cliffs
+            // Use non-floored coordinates for smooth region transitions
+            const regionScale = scale * 0.08;
+            const regionGridX = Math.floor(x * regionScale);
+            const regionGridZ = Math.floor(z * regionScale);
+            const regionFracX = (x * regionScale) - regionGridX;
+            const regionFracZ = (z * regionScale) - regionGridZ;
+
+            // Get region noise at corners
+            const r00 = random2D(regionGridX, regionGridZ);
+            const r10 = random2D(regionGridX + 1, regionGridZ);
+            const r01 = random2D(regionGridX, regionGridZ + 1);
+            const r11 = random2D(regionGridX + 1, regionGridZ + 1);
+
+            // Smooth interpolation between corners
+            const rsx = smoothstep(regionFracX);
+            const rsz = smoothstep(regionFracZ);
+            const r0 = r00 * (1 - rsx) + r10 * rsx;
+            const r1 = r01 * (1 - rsx) + r11 * rsx;
+            const regionNoise = r0 * (1 - rsz) + r1 * rsz;
+
+            // Map region noise to terrain multiplier with very smooth gradients
+            let terrainMultiplier;
+            if (regionNoise < 0.15) {
+                terrainMultiplier = 0.15; // Mostly flat areas
+            } else if (regionNoise < 0.35) {
+                const t = smoothstep((regionNoise - 0.15) / 0.2);
+                terrainMultiplier = 0.15 + t * 0.45; // 0.15 to 0.6 gentle hills
+            } else if (regionNoise < 0.65) {
+                const t = smoothstep((regionNoise - 0.35) / 0.3);
+                terrainMultiplier = 0.6 + t * 0.5; // 0.6 to 1.1 normal hills
+            } else {
+                const t = smoothstep((regionNoise - 0.65) / 0.35);
+                terrainMultiplier = 1.1 + t * 0.5; // 1.1 to 1.6 larger hills
+            }
+
+            return (height + largeFeat1 + largeFeat2 + largeFeat3) * terrainMultiplier;
+        };
+
+        // Terrain size for edge detection
+        const terrainSize = 100;
+        const halfSize = terrainSize / 2;
+        const edgeBlendDistance = 10; // Distance from edge where blending starts
+
+        // Apply varied terrain to each vertex
+        for (let i = 0; i < positions.count; i++) {
+            const localX = positions.getX(i);
+            const localY = positions.getY(i);
+
+            // Generate varied height with hills, valleys, and flats
+            let height = variedTerrain(localX, localY) * intensity;
+
+            // Calculate distance from edges (0 = at edge, 1 = far from edge)
+            const distFromLeftEdge = (localX + halfSize) / edgeBlendDistance;
+            const distFromRightEdge = (halfSize - localX) / edgeBlendDistance;
+            const distFromBottomEdge = (localY + halfSize) / edgeBlendDistance;
+            const distFromTopEdge = (halfSize - localY) / edgeBlendDistance;
+
+            // Get the minimum distance (closest edge)
+            const edgeFactor = Math.min(
+                Math.min(distFromLeftEdge, distFromRightEdge),
+                Math.min(distFromBottomEdge, distFromTopEdge)
+            );
+
+            // Clamp and smooth the edge factor
+            const blend = Math.max(0, Math.min(1, edgeFactor));
+            const smoothBlend = smoothstep(blend);
+
+            // Blend height to 0 at edges
+            height *= smoothBlend;
+
+            positions.setZ(i, height);
+        }
+
+        positions.needsUpdate = true;
+        geometry.computeVertexNormals();
+
+        console.log('✅ Varied terrain generated successfully with flat edges for seamless chunks');
+    }
+
+    flattenTerrain() {
+        if (!this.terrain) return;
+
+        const geometry = this.terrain.geometry;
+        const positions = geometry.attributes.position;
+
+        console.log('Flattening terrain...');
+
+        // Set all heights to 0
+        for (let i = 0; i < positions.count; i++) {
+            positions.setZ(i, 0);
+        }
+
+        positions.needsUpdate = true;
+        geometry.computeVertexNormals();
+
+        console.log('✅ Terrain flattened');
+    }
+
+    // Auto-populate bushes on grass-textured areas
+    autoPopulateBushes(density = 0.06, clearExisting = false) {
+        if (clearExisting) {
+            // Remove existing auto-generated bushes
+            const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'bushes');
+            toRemove.forEach(obj => {
+                this.scene.remove(obj);
+                const idx = this.levelObjects.indexOf(obj);
+                if (idx > -1) this.levelObjects.splice(idx, 1);
+            });
+        }
+
+        // Bush asset options (from trees and grass folders)
+        const bushAssets = [
+            { file: 'trees/SM_Env_Bush_01.glb', weight: 3 },
+            { file: 'trees/SM_Env_Bush_02.glb', weight: 3 },
+            { file: 'trees/SM_Env_Bush_03.glb', weight: 3 },
+            { file: 'grass/SM_Env_Grass_Bush_01.glb', weight: 2 }
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        bushAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset.file);
+            }
+        });
+
+        // Get splatmap data to check grass texture (R channel)
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect all bush positions first
+        const bushPositions = [];
+
+        // Sample the terrain - bushes are moderately sparse
+        const step = 6;
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
+
+                // Add randomness to position within the cell
+                const worldX = x + (Math.random() - 0.5) * step;
+                const worldZ = z + (Math.random() - 0.5) * step;
+
+                // Convert world position to splatmap coordinates
+                const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
+                const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
+
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Get pixel index
+                const pixelIndex = (clampedZ * splatmapSize + clampedX) * 4;
+                const r = imageData.data[pixelIndex]; // Grass channel
+
+                // Check if this is grass texture (bushes spawn on grass)
+                if (r > 200) {
+                    // Random chance based on density
+                    if (Math.random() > density) continue;
+
+                    // Check if there's already a bush nearby
+                    const minDistance = 3.0; // Bushes need some space
+
+                    // Check against already placed bushes in this session
+                    const tooCloseToBushes = bushPositions.some(pos => {
+                        const dx = pos.x - worldX;
+                        const dz = pos.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToBushes) continue;
+
+                    // Check against existing bushes only
+                    const tooCloseToExistingBushes = this.levelObjects.some(obj => {
+                        if (!obj.position) return false;
+                        if (obj.userData?.autoGenerated !== 'bushes' && obj.userData?.type !== 'bushes') return false;
+                        const dx = obj.position.x - worldX;
+                        const dz = obj.position.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToExistingBushes) continue;
+
+                    // Get terrain height at this position
+                    const terrainY = this.getTerrainHeightAt(worldX, worldZ);
+
+                    // Pick random bush asset
+                    const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
+
+                    bushPositions.push({
+                        x: worldX,
+                        y: terrainY,
+                        z: worldZ,
+                        rotation: Math.random() * Math.PI * 2,
+                        scale: 0.85 + Math.random() * 0.35, // Varied sizes
+                        file: randomFile
+                    });
+                }
+            }
+        }
+
+        console.log(`Placing ${bushPositions.length} bush objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        bushPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Load unique bush models and clone them for each position
+        const uniqueFiles = Object.keys(positionsByFile);
+        let totalPlaced = 0;
+
+        const loadNextBushModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} bush objects using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/nature/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+
+                    // Process in batches of 50 to prevent freezing
+                    const batchSize = 50;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+                            const bushObj = baseModel.clone();
+                            // Share geometry and materials to save memory
+                            bushObj.traverse((child) => {
+                                if (child.isMesh && baseModel) {
+                                    // Find corresponding mesh in base model
+                                    baseModel.traverse((baseChild) => {
+                                        if (baseChild.isMesh && baseChild.name === child.name) {
+                                            child.geometry = baseChild.geometry; // Share geometry
+                                            child.material = baseChild.material; // Share material
+                                        }
+                                    });
+                                }
+                            });
+                            bushObj.position.set(pos.x, pos.y, pos.z);
+                            bushObj.rotation.y = pos.rotation;
+                            bushObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                            bushObj.userData = {
+                                type: 'bushes',
+                                file: filename,
+                                name: `Bush_${totalPlaced}`,
+                                autoGenerated: 'bushes'
+                            };
+
+                            this.scene.add(bushObj);
+                            this.levelObjects.push(bushObj);
+                            totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        // Process next batch after a short delay
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 10); // 10ms delay between batches
+                        } else {
+                            // All batches done for this model, load next model
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextBushModel(index + 1);
+                        }
+                    };
+
+                    // Start processing first batch
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load bush model:', filename, error);
+                    loadNextBushModel(index + 1);
+                }
+            );
+        };
+
+        // Start loading first model
+        loadNextBushModel(0);
+
+        return bushPositions.length;
+    }
+
+    clearAutoBushes() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'bushes');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated bushes`);
+        this.updateSceneTree();
+        this.updateStatusBar();
+    }
+
+    // Auto-populate mushrooms on grass-textured areas
+    autoPopulateMushrooms(density = 0.04, clearExisting = false) {
+        if (clearExisting) {
+            // Remove existing auto-generated mushrooms
+            const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'mushrooms');
+            toRemove.forEach(obj => {
+                this.scene.remove(obj);
+                const idx = this.levelObjects.indexOf(obj);
+                if (idx > -1) this.levelObjects.splice(idx, 1);
+            });
+        }
+
+        // Mushroom asset options (using FBX files)
+        const mushroomAssets = [
+            // Single mushrooms - most common
+            { file: 'SM_Prop_Mushroom_01.FBX', weight: 4 },
+            { file: 'SM_Prop_Mushroom_02.FBX', weight: 4 },
+            { file: 'SM_Prop_Mushroom_03.FBX', weight: 4 },
+            { file: 'SM_Prop_Mushroom_04.FBX', weight: 4 },
+            { file: 'SM_Prop_Mushroom_05.FBX', weight: 4 },
+            { file: 'SM_Prop_Mushroom_06.FBX', weight: 4 },
+            // Sparse mushrooms - common
+            { file: 'SM_Prop_Mushroom_Sparse_01.FBX', weight: 3 },
+            { file: 'SM_Prop_Mushroom_Sparse_02.FBX', weight: 3 },
+            { file: 'SM_Prop_Mushroom_Sparse_03.FBX', weight: 3 },
+            { file: 'SM_Prop_Mushroom_Sparse_04.FBX', weight: 3 },
+            { file: 'SM_Prop_Mushroom_Sparse_05.FBX', weight: 3 },
+            // Mushroom groups - less common
+            { file: 'SM_Prop_Mushroom_Group_02.FBX', weight: 2 },
+            { file: 'SM_Prop_Mushroom_Group_03.FBX', weight: 2 },
+            { file: 'SM_Prop_Mushroom_Group_04.FBX', weight: 2 },
+            { file: 'SM_Prop_Mushroom_Group_05.FBX', weight: 2 },
+            // Mushroom houses - rare
+            { file: 'SM_Prop_MushroomHouse_01.FBX', weight: 1 },
+            { file: 'SM_Prop_MushroomHouse_02.FBX', weight: 1 }
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        mushroomAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset.file);
+            }
+        });
+
+        // Get splatmap data to check grass texture (R channel)
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect all mushroom positions first
+        const mushroomPositions = [];
+        const maxMushrooms = 100;
+
+        // Sample the terrain - mushrooms are fairly sparse
+        const step = 6;
+        for (let x = -terrainSize / 2; x < terrainSize / 2; x += step) {
+            for (let z = -terrainSize / 2; z < terrainSize / 2; z += step) {
+                if (mushroomPositions.length >= maxMushrooms) break;
+
+                // Add randomness to position within the cell
+                const worldX = x + (Math.random() - 0.5) * step;
+                const worldZ = z + (Math.random() - 0.5) * step;
+
+                // Convert world position to splatmap coordinates
+                const splatX = Math.floor(((worldX + terrainSize / 2) / terrainSize) * splatmapSize);
+                const splatZ = Math.floor(((worldZ + terrainSize / 2) / terrainSize) * splatmapSize);
+
+                // Clamp to valid splatmap range
+                const clampedX = Math.max(0, Math.min(splatmapSize - 1, splatX));
+                const clampedZ = Math.max(0, Math.min(splatmapSize - 1, splatZ));
+
+                // Get pixel index
+                const pixelIndex = (clampedZ * splatmapSize + clampedX) * 4;
+                const r = imageData.data[pixelIndex]; // Grass channel
+
+                // Check if this is grass texture (mushrooms spawn on grass)
+                if (r > 200) {
+                    // Random chance based on density
+                    if (Math.random() > density) continue;
+
+                    // Check if there's already a mushroom nearby
+                    const minDistance = 2.5; // Mushrooms need some space
+
+                    // Check against already placed mushrooms in this session
+                    const tooCloseToMushrooms = mushroomPositions.some(pos => {
+                        const dx = pos.x - worldX;
+                        const dz = pos.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToMushrooms) continue;
+
+                    // Check against existing mushrooms only
+                    const tooCloseToExistingMushrooms = this.levelObjects.some(obj => {
+                        if (!obj.position) return false;
+                        if (obj.userData?.autoGenerated !== 'mushrooms' && obj.userData?.type !== 'mushrooms') return false;
+                        const dx = obj.position.x - worldX;
+                        const dz = obj.position.z - worldZ;
+                        return Math.sqrt(dx * dx + dz * dz) < minDistance;
+                    });
+                    if (tooCloseToExistingMushrooms) continue;
+
+                    // Get terrain height at this position
+                    const terrainY = this.getTerrainHeightAt(worldX, worldZ);
+
+                    // Pick random mushroom asset
+                    const randomFile = weightedAssets[Math.floor(Math.random() * weightedAssets.length)];
+
+                    mushroomPositions.push({
+                        x: worldX,
+                        y: terrainY,
+                        z: worldZ,
+                        rotation: Math.random() * Math.PI * 2,
+                        scale: 0.8 + Math.random() * 0.4, // Varied sizes
+                        file: randomFile
+                    });
+                }
+            }
+        }
+
+        console.log(`Placing ${mushroomPositions.length} mushroom objects...`);
+
+        // Group positions by file to load each model only once
+        const positionsByFile = {};
+        mushroomPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        // Load unique mushroom models and clone them for each position
+        const uniqueFiles = Object.keys(positionsByFile);
+        let loadedCount = 0;
+        let totalPlaced = 0;
+
+        uniqueFiles.forEach(filename => {
+            const path = `/assets/props/${filename}`;
+
+            this.fbxLoader.load(
+                path,
+                (fbx) => {
+                    const baseModel = fbx;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            // Apply meadow texture to mushrooms (props use meadow atlas)
+                            const hasVertexColors = child.geometry?.attributes?.color;
+                            const materialConfig = {
+                                map: this.textures.meadow,
+                                color: 0xffffff,
+                                roughness: 0.8,
+                                metalness: 0.1,
+                                side: THREE.DoubleSide
+                            };
+                            if (hasVertexColors) {
+                                materialConfig.vertexColors = true;
+                            }
+                            child.material = new THREE.MeshStandardMaterial(materialConfig);
+                        }
+                    });
+
+                    // Clone this model for each position that uses it
+                    const positions = positionsByFile[filename];
+                    positions.forEach((pos, idx) => {
+                        const mushroomObj = baseModel.clone();
+                        mushroomObj.position.set(pos.x, pos.y, pos.z);
+                        // Apply FBX scale (0.01) combined with variation
+                        const finalScale = pos.scale * 0.01;
+                        mushroomObj.scale.set(finalScale, finalScale, finalScale);
+                        // Rotate FBX (Unreal Z-up to Three.js Y-up)
+                        mushroomObj.rotation.x = Math.PI / 2; // 90°
+                        mushroomObj.rotation.y = pos.rotation;
+
+                        mushroomObj.userData = {
+                            type: 'mushrooms',
+                            file: filename,
+                            name: `Mushroom_${totalPlaced}`,
+                            autoGenerated: 'mushrooms'
+                        };
+
+                        this.scene.add(mushroomObj);
+                        this.levelObjects.push(mushroomObj);
+                        totalPlaced++;
+                    });
+
+                    loadedCount++;
+                    if (loadedCount === uniqueFiles.length) {
+                        console.log(`✅ Auto-populated ${totalPlaced} mushroom objects using ${uniqueFiles.length} unique models`);
+                        this.updateSceneTree();
+                        this.updateStatusBar();
+                    }
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load mushroom model:', filename, error);
+                    loadedCount++;
+                }
+            );
+        });
+
+        return mushroomPositions.length;
+    }
+
+    clearAutoMushrooms() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'mushrooms');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated mushrooms`);
+        this.updateSceneTree();
+        this.updateStatusBar();
     }
 
     // Get terrain height at world position
@@ -2850,6 +4527,467 @@ class LevelEditor {
             if (idx > -1) this.levelObjects.splice(idx, 1);
         });
         console.log(`Cleared ${toRemove.length} auto-generated grass objects`);
+        this.updateSceneTree();
+        this.updateStatusBar();
+    }
+
+    autoPopulateTown(density = 0.02, clearExisting = false) {
+        if (clearExisting) {
+            this.clearAutoTown();
+        }
+
+        // Building asset options with weighted selection
+        const buildingAssets = [
+            // SMALL BUILDINGS - Most common
+            { file: 'SM_Bld_Preset_Hut_01_Optimized.glb', weight: 3, size: 'small', category: 'residential' },
+            { file: 'SM_Bld_Preset_Hut_02_Optimized.glb', weight: 3, size: 'small', category: 'residential' },
+            { file: 'SM_Bld_Preset_Outhouse_01_Optimized.glb', weight: 2, size: 'small', category: 'utility' },
+            { file: 'SM_Bld_Preset_Shelter_01_Optimized.glb', weight: 2, size: 'small', category: 'residential' },
+            { file: 'SM_Bld_Preset_Shelter_02_Optimized.glb', weight: 2, size: 'small', category: 'residential' },
+
+            // MEDIUM HOUSES - Common
+            { file: 'SM_Bld_Preset_House_01_A_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_02_A_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_03_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_04_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_05_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_06_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_07_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_08_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_09_A_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_09_B_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+            { file: 'SM_Bld_Preset_House_09_C_Optimized.glb', weight: 2, size: 'medium', category: 'residential' },
+
+            // LARGE BUILDINGS - Less common
+            { file: 'SM_Bld_Preset_House_10_Optimized.glb', weight: 1, size: 'large', category: 'residential' },
+            { file: 'SM_Bld_Preset_Blacksmith_01_Optimized.glb', weight: 1, size: 'large', category: 'commercial' },
+            { file: 'SM_Bld_Preset_Stables_01_Optimized.glb', weight: 1, size: 'large', category: 'commercial' },
+            { file: 'SM_Bld_Preset_Tavern_01_Optimized.glb', weight: 1, size: 'large', category: 'commercial' },
+            { file: 'SM_Bld_Preset_House_Windmill_01_Optimized.glb', weight: 0.5, size: 'large', category: 'commercial' },
+
+            // SPECIAL/LANDMARK - Rare
+            { file: 'SM_Bld_Preset_Church_01_A_Optimized.glb', weight: 0.3, size: 'xlarge', category: 'landmark' },
+            { file: 'SM_Bld_Preset_Church_01_B_Optimized.glb', weight: 0.3, size: 'xlarge', category: 'landmark' },
+            { file: 'SM_Bld_Preset_Tower_01_Optimized.glb', weight: 0.2, size: 'xlarge', category: 'landmark' },
+        ];
+
+        // Build weighted array for random selection
+        const weightedAssets = [];
+        buildingAssets.forEach(asset => {
+            for (let i = 0; i < asset.weight * 10; i++) {
+                weightedAssets.push(asset);
+            }
+        });
+
+        // Get splatmap data
+        const imageData = this.splatmapContext.getImageData(0, 0, 512, 512);
+        const terrainSize = 100;
+        const splatmapSize = 512;
+
+        // Collect building positions
+        const buildingPositions = [];
+
+        // Structured town layout - rows along streets
+        const streetSpacing = 15;  // Distance between parallel streets (scaled for 100x100)
+        const buildingSpacing = 8;  // Distance between buildings along street (smaller for 100x100 chunks)
+        const buildingSetback = 3;  // Distance from street edge
+        const townRadius = 40;      // Radius of town from center (scaled for 100x100 chunks)
+
+        // Get categorized buildings
+        const residentialAssets = buildingAssets.filter(a => a.category === 'residential');
+        const commercialAssets = buildingAssets.filter(a => a.category === 'commercial');
+        const landmarkAssets = buildingAssets.filter(a => a.category === 'landmark');
+        const smallHouses = residentialAssets.filter(a => a.size === 'small');
+        const mediumHouses = residentialAssets.filter(a => a.size === 'medium');
+        const largeHouses = residentialAssets.filter(a => a.size === 'large');
+        const utilityBuildings = buildingAssets.filter(a => a.category === 'utility');
+
+        // Windmill and stables for outskirts
+        const windmill = buildingAssets.find(a => a.file.includes('Windmill'));
+        const stables = buildingAssets.find(a => a.file.includes('Stables'));
+
+        // Helper to check terrain flatness
+        const isTerrainFlat = (x, z) => {
+            const checkRadius = 5;
+            const heightCenter = this.getTerrainHeightAt(x, z);
+            const heightN = this.getTerrainHeightAt(x, z + checkRadius);
+            const heightS = this.getTerrainHeightAt(x, z - checkRadius);
+            const heightE = this.getTerrainHeightAt(x + checkRadius, z);
+            const heightW = this.getTerrainHeightAt(x - checkRadius, z);
+            const maxHeightDiff = Math.max(
+                Math.abs(heightN - heightCenter),
+                Math.abs(heightS - heightCenter),
+                Math.abs(heightE - heightCenter),
+                Math.abs(heightW - heightCenter)
+            );
+            return maxHeightDiff < 3.0; // Tolerance for slopes
+        };
+
+        // PHASE 1: Place landmark in town square (center)
+        if (landmarkAssets.length > 0) {
+            const landmark = landmarkAssets[Math.floor(Math.random() * landmarkAssets.length)];
+            const x = 0;
+            const z = 0;
+            if (isTerrainFlat(x, z)) {
+                buildingPositions.push({
+                    x: x,
+                    y: this.getTerrainHeightAt(x, z),
+                    z: z,
+                    rotation: 0,
+                    scale: 1.0,
+                    file: landmark.file,
+                    size: landmark.size,
+                    category: landmark.category
+                });
+            }
+        }
+
+        // PHASE 2: Place commercial ring around town square
+        const commercialRingRadius = 15; // Scaled for 100x100 chunks
+        const commercialPositions = [
+            { x: commercialRingRadius, z: 0, rot: -Math.PI/2 },      // East
+            { x: -commercialRingRadius, z: 0, rot: Math.PI/2 },      // West
+            { x: 0, z: commercialRingRadius, rot: Math.PI },         // South
+            { x: 0, z: -commercialRingRadius, rot: 0 },              // North
+            { x: commercialRingRadius * 0.7, z: commercialRingRadius * 0.7, rot: -Math.PI*0.75 },   // SE
+            { x: -commercialRingRadius * 0.7, z: commercialRingRadius * 0.7, rot: Math.PI*0.75 },   // SW
+            { x: commercialRingRadius * 0.7, z: -commercialRingRadius * 0.7, rot: -Math.PI*0.25 },  // NE
+            { x: -commercialRingRadius * 0.7, z: -commercialRingRadius * 0.7, rot: Math.PI*0.25 },  // NW
+        ];
+
+        commercialPositions.forEach(pos => {
+            if (commercialAssets.length === 0) return;
+            const asset = commercialAssets[Math.floor(Math.random() * commercialAssets.length)];
+            if (isTerrainFlat(pos.x, pos.z)) {
+                buildingPositions.push({
+                    x: pos.x,
+                    y: this.getTerrainHeightAt(pos.x, pos.z),
+                    z: pos.z,
+                    rotation: pos.rot,
+                    scale: 1.0,
+                    file: asset.file,
+                    size: asset.size,
+                    category: asset.category
+                });
+            }
+        });
+
+        // PHASE 3: Place windmills and stables on outskirts
+        const outskirtPositions = [
+            { x: townRadius * 0.9, z: townRadius * 0.6, rot: -Math.PI * 0.6 },
+            { x: -townRadius * 0.9, z: townRadius * 0.6, rot: Math.PI * 0.6 },
+            { x: townRadius * 0.9, z: -townRadius * 0.6, rot: -Math.PI * 0.3 },
+            { x: -townRadius * 0.9, z: -townRadius * 0.6, rot: Math.PI * 0.3 },
+        ];
+
+        outskirtPositions.forEach((pos, i) => {
+            const asset = i % 2 === 0 && windmill ? windmill : (stables || commercialAssets[0]);
+            if (asset && isTerrainFlat(pos.x, pos.z)) {
+                buildingPositions.push({
+                    x: pos.x,
+                    y: this.getTerrainHeightAt(pos.x, pos.z),
+                    z: pos.z,
+                    rotation: pos.rot,
+                    scale: 1.0,
+                    file: asset.file,
+                    size: asset.size,
+                    category: asset.category
+                });
+            }
+        });
+
+        // PHASE 4: Create residential streets with improved variety
+        let streetIndex = 0;
+
+        // North-South streets
+        for (let streetX = -townRadius; streetX <= townRadius; streetX += streetSpacing) {
+            if (Math.abs(streetX) < 30) continue; // Skip center (commercial zone)
+
+            const distFromCenter = Math.abs(streetX);
+            const densityMultiplier = 1 - (distFromCenter / townRadius) * 0.4; // Denser near center
+
+            // Determine neighborhood "style" for this street
+            const neighborhoodStyle = Math.floor(Math.random() * 3); // 0=poor, 1=middle, 2=wealthy
+
+            // Buildings on both sides of street
+            for (let side = -1; side <= 1; side += 2) {
+                const buildingSide = streetX + (buildingSetback * side);
+                let consecutiveBuildings = 0;
+
+                // Place buildings along this street
+                for (let z = -townRadius; z < townRadius; z += buildingSpacing) {
+                    // Variable density based on distance from center
+                    const skipChance = 1 - (0.75 * densityMultiplier);
+                    if (Math.random() > skipChance) {
+                        consecutiveBuildings = 0;
+                        continue;
+                    }
+
+                    consecutiveBuildings++;
+
+                    // Select building based on neighborhood and position
+                    let asset;
+                    const isCornerLot = Math.abs(z) > townRadius * 0.8;
+
+                    if (isCornerLot && largeHouses.length > 0 && Math.random() > 0.5) {
+                        // Large estates on corners
+                        asset = largeHouses[Math.floor(Math.random() * largeHouses.length)];
+                    } else if (neighborhoodStyle === 2 && mediumHouses.length > 0) {
+                        // Wealthy: mostly medium houses
+                        asset = Math.random() > 0.3 ?
+                            mediumHouses[Math.floor(Math.random() * mediumHouses.length)] :
+                            smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    } else if (neighborhoodStyle === 1 && mediumHouses.length > 0) {
+                        // Middle class: mix of small and medium
+                        asset = Math.random() > 0.5 ?
+                            mediumHouses[Math.floor(Math.random() * mediumHouses.length)] :
+                            smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    } else {
+                        // Poor: mostly small
+                        asset = smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    }
+
+                    const rotation = side > 0 ? -Math.PI/2 : Math.PI/2;
+
+                    // Varied offset - less offset for wealthy, more for poor
+                    const offsetRange = neighborhoodStyle === 2 ? 2 : (neighborhoodStyle === 1 ? 3 : 4);
+                    const xOffset = (Math.random() - 0.5) * offsetRange;
+                    const zOffset = (Math.random() - 0.5) * offsetRange;
+                    const x = buildingSide + xOffset;
+                    const zPos = z + zOffset;
+
+                    if (isTerrainFlat(x, zPos)) {
+                        buildingPositions.push({
+                            x: x,
+                            y: this.getTerrainHeightAt(x, zPos),
+                            z: zPos,
+                            rotation: rotation,
+                            scale: 0.95 + Math.random() * 0.1,
+                            file: asset.file,
+                            size: asset.size,
+                            category: asset.category
+                        });
+
+                        // Occasionally add utility building behind house
+                        if (consecutiveBuildings > 2 && utilityBuildings.length > 0 && Math.random() > 0.7) {
+                            const utilAsset = utilityBuildings[Math.floor(Math.random() * utilityBuildings.length)];
+                            const behindX = x + (side * -7); // Behind the house
+                            const behindZ = zPos + (Math.random() - 0.5) * 4;
+
+                            if (isTerrainFlat(behindX, behindZ)) {
+                                buildingPositions.push({
+                                    x: behindX,
+                                    y: this.getTerrainHeightAt(behindX, behindZ),
+                                    z: behindZ,
+                                    rotation: rotation,
+                                    scale: 1.0,
+                                    file: utilAsset.file,
+                                    size: utilAsset.size,
+                                    category: utilAsset.category
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            streetIndex++;
+        }
+
+        // East-West streets with same improvements
+        for (let streetZ = -townRadius; streetZ <= townRadius; streetZ += streetSpacing) {
+            if (Math.abs(streetZ) < 30) continue;
+
+            const distFromCenter = Math.abs(streetZ);
+            const densityMultiplier = 1 - (distFromCenter / townRadius) * 0.4;
+            const neighborhoodStyle = Math.floor(Math.random() * 3);
+
+            for (let side = -1; side <= 1; side += 2) {
+                const buildingSide = streetZ + (buildingSetback * side);
+                let consecutiveBuildings = 0;
+
+                for (let x = -townRadius; x < townRadius; x += buildingSpacing) {
+                    if (Math.abs(x) > townRadius - streetSpacing) continue;
+
+                    const skipChance = 1 - (0.75 * densityMultiplier);
+                    if (Math.random() > skipChance) {
+                        consecutiveBuildings = 0;
+                        continue;
+                    }
+
+                    consecutiveBuildings++;
+
+                    let asset;
+                    const isCornerLot = Math.abs(x) > townRadius * 0.8;
+
+                    if (isCornerLot && largeHouses.length > 0 && Math.random() > 0.5) {
+                        asset = largeHouses[Math.floor(Math.random() * largeHouses.length)];
+                    } else if (neighborhoodStyle === 2 && mediumHouses.length > 0) {
+                        asset = Math.random() > 0.3 ?
+                            mediumHouses[Math.floor(Math.random() * mediumHouses.length)] :
+                            smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    } else if (neighborhoodStyle === 1 && mediumHouses.length > 0) {
+                        asset = Math.random() > 0.5 ?
+                            mediumHouses[Math.floor(Math.random() * mediumHouses.length)] :
+                            smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    } else {
+                        asset = smallHouses[Math.floor(Math.random() * smallHouses.length)];
+                    }
+
+                    const rotation = side > 0 ? Math.PI : 0;
+                    const offsetRange = neighborhoodStyle === 2 ? 2 : (neighborhoodStyle === 1 ? 3 : 4);
+                    const xOffset = (Math.random() - 0.5) * offsetRange;
+                    const zOffset = (Math.random() - 0.5) * offsetRange;
+                    const xPos = x + xOffset;
+                    const z = buildingSide + zOffset;
+
+                    if (isTerrainFlat(xPos, z)) {
+                        buildingPositions.push({
+                            x: xPos,
+                            y: this.getTerrainHeightAt(xPos, z),
+                            z: z,
+                            rotation: rotation,
+                            scale: 0.95 + Math.random() * 0.1,
+                            file: asset.file,
+                            size: asset.size,
+                            category: asset.category
+                        });
+
+                        // Utility buildings behind houses
+                        if (consecutiveBuildings > 2 && utilityBuildings.length > 0 && Math.random() > 0.7) {
+                            const utilAsset = utilityBuildings[Math.floor(Math.random() * utilityBuildings.length)];
+                            const behindX = xPos + (Math.random() - 0.5) * 4;
+                            const behindZ = z + (side * -7);
+
+                            if (isTerrainFlat(behindX, behindZ)) {
+                                buildingPositions.push({
+                                    x: behindX,
+                                    y: this.getTerrainHeightAt(behindX, behindZ),
+                                    z: behindZ,
+                                    rotation: rotation,
+                                    scale: 1.0,
+                                    file: utilAsset.file,
+                                    size: utilAsset.size,
+                                    category: utilAsset.category
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        console.log(`Placing ${buildingPositions.length} buildings...`);
+
+        // Group positions by file
+        const positionsByFile = {};
+        buildingPositions.forEach(pos => {
+            if (!positionsByFile[pos.file]) {
+                positionsByFile[pos.file] = [];
+            }
+            positionsByFile[pos.file].push(pos);
+        });
+
+        const uniqueFiles = Object.keys(positionsByFile);
+        let totalPlaced = 0;
+
+        // Load building models sequentially
+        const loadNextBuildingModel = (index) => {
+            if (index >= uniqueFiles.length) {
+                console.log(`✅ Auto-populated ${totalPlaced} buildings using ${uniqueFiles.length} unique models`);
+                this.updateSceneTree();
+                this.updateStatusBar();
+                return;
+            }
+
+            const filename = uniqueFiles[index];
+            const path = `/assets/buildings/${filename}`;
+
+            this.gltfLoader.load(
+                path,
+                (gltf) => {
+                    const baseModel = gltf.scene;
+                    baseModel.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    const positions = positionsByFile[filename];
+                    console.log(`Loading ${positions.length} instances of ${filename} in batches...`);
+
+                    // Process in batches
+                    const batchSize = 20;
+                    let batchIndex = 0;
+
+                    const processBatch = () => {
+                        const start = batchIndex * batchSize;
+                        const end = Math.min(start + batchSize, positions.length);
+
+                        for (let idx = start; idx < end; idx++) {
+                            const pos = positions[idx];
+                            const buildingObj = baseModel.clone();
+
+                            // Share geometry and materials
+                            buildingObj.traverse((child) => {
+                                if (child.isMesh && baseModel) {
+                                    baseModel.traverse((baseChild) => {
+                                        if (baseChild.isMesh && baseChild.name === child.name) {
+                                            child.geometry = baseChild.geometry;
+                                            child.material = baseChild.material;
+                                        }
+                                    });
+                                }
+                            });
+
+                            buildingObj.position.set(pos.x, pos.y, pos.z);
+                            buildingObj.rotation.y = pos.rotation;
+                            buildingObj.scale.set(pos.scale, pos.scale, pos.scale);
+
+                            buildingObj.userData = {
+                                type: 'buildings',
+                                file: filename,
+                                name: `Building_${totalPlaced}`,
+                                autoGenerated: 'buildings',
+                                category: pos.category
+                            };
+
+                            this.scene.add(buildingObj);
+                            this.levelObjects.push(buildingObj);
+                            totalPlaced++;
+                        }
+
+                        batchIndex++;
+
+                        if (batchIndex * batchSize < positions.length) {
+                            setTimeout(processBatch, 15);
+                        } else {
+                            console.log(`✅ Placed ${end} instances of ${filename}`);
+                            loadNextBuildingModel(index + 1);
+                        }
+                    };
+
+                    processBatch();
+                },
+                undefined,
+                (error) => {
+                    console.warn('Could not load building model:', filename, error);
+                    loadNextBuildingModel(index + 1);
+                }
+            );
+        };
+
+        loadNextBuildingModel(0);
+    }
+
+    clearAutoTown() {
+        const toRemove = this.levelObjects.filter(obj => obj.userData?.autoGenerated === 'buildings');
+        toRemove.forEach(obj => {
+            this.scene.remove(obj);
+            const idx = this.levelObjects.indexOf(obj);
+            if (idx > -1) this.levelObjects.splice(idx, 1);
+        });
+        console.log(`Removed ${toRemove.length} auto-generated buildings`);
         this.updateSceneTree();
         this.updateStatusBar();
     }
